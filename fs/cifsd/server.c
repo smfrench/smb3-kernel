@@ -136,8 +136,7 @@ andx_again:
 		return TCP_HANDLER_CONTINUE;
 	}
 
-	if (work->sess && conn->ops->is_sign_req &&
-		conn->ops->is_sign_req(work, command)) {
+	if (conn->ops->is_sign_req(work, command)) {
 		ret = conn->ops->check_sign_req(work);
 		if (!ret) {
 			conn->ops->set_rsp_status(work, STATUS_ACCESS_DENIED);
@@ -224,6 +223,11 @@ static void __handle_ksmbd_work(struct ksmbd_work *work,
 				goto send;
 			}
 		}
+
+		if ((work->sess && work->sess->sign) ||
+		     smb3_11_final_sess_setup_resp(work) ||
+		     conn->ops->is_sign_req(work, command))
+			conn->ops->set_sign_rsp(work);
 	} while (is_chained_smb2_message(work));
 
 	if (work->send_no_response)
@@ -238,11 +242,7 @@ send:
 			conn->ops->set_rsp_status(work, STATUS_DATA_ERROR);
 			goto send;
 		}
-	} else if (work->sess && (work->sess->sign ||
-		smb3_final_sess_setup_resp(work) ||
-		(conn->ops->is_sign_req &&
-		conn->ops->is_sign_req(work, command))))
-		conn->ops->set_sign_rsp(work);
+	}
 
 	ksmbd_conn_write(work);
 }
