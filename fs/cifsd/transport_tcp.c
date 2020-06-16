@@ -38,34 +38,27 @@ static struct ksmbd_transport_ops ksmbd_tcp_transport_ops;
 
 static inline void ksmbd_tcp_nodelay(struct socket *sock)
 {
-	int val = 1;
-
-	kernel_setsockopt(sock, SOL_TCP, TCP_NODELAY,
-		(char *)&val, sizeof(val));
+	tcp_sock_set_nodelay(sock->sk);
 }
 
 static inline void ksmbd_tcp_reuseaddr(struct socket *sock)
 {
-	int val = 1;
-
-	kernel_setsockopt(sock, SOL_SOCKET, SO_REUSEADDR,
-		(char *)&val, sizeof(val));
+	sock_set_reuseaddr(sock->sk);
 }
 
-static inline void ksmbd_tcp_rev_timeout(struct socket *sock, unsigned int sec)
+static inline void ksmbd_tcp_rcv_timeout(struct socket *sock, s64 secs)
 {
-	struct __kernel_old_timeval tv = { .tv_sec = sec, .tv_usec = 0 };
-
-	kernel_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO_OLD, (char *)&tv,
-			  sizeof(tv));
+	lock_sock(sock->sk);
+	if (secs && secs < MAX_SCHEDULE_TIMEOUT / HZ - 1)
+		sock->sk->sk_rcvtimeo = secs * HZ;
+	else
+		sock->sk->sk_rcvtimeo = MAX_SCHEDULE_TIMEOUT;
+	release_sock(sock->sk);
 }
 
-static inline void ksmbd_tcp_snd_timeout(struct socket *sock, unsigned int sec)
+static inline void ksmbd_tcp_snd_timeout(struct socket *sock, s64 secs)
 {
-	struct __kernel_old_timeval tv = { .tv_sec = sec, .tv_usec = 0 };
-
-	kernel_setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO_OLD, (char *)&tv,
-			  sizeof(tv));
+	sock_set_sndtimeo(sock->sk, secs);
 }
 
 static struct tcp_transport *alloc_transport(struct socket *client_sk)
@@ -377,7 +370,7 @@ static void tcp_destroy_socket(struct socket *ksmbd_socket)
 		return;
 
 	/* set zero to timeout */
-	ksmbd_tcp_rev_timeout(ksmbd_socket, 0);
+	ksmbd_tcp_rcv_timeout(ksmbd_socket, 0);
 	ksmbd_tcp_snd_timeout(ksmbd_socket, 0);
 
 	ret = kernel_sock_shutdown(ksmbd_socket, SHUT_RDWR);
@@ -423,10 +416,10 @@ static int create_socket(struct interface *iface)
 	ksmbd_tcp_nodelay(ksmbd_socket);
 	ksmbd_tcp_reuseaddr(ksmbd_socket);
 
-	ret = kernel_setsockopt(ksmbd_socket,
+	ret = sock_setsockopt(ksmbd_socket,
 				SOL_SOCKET,
 				SO_BINDTODEVICE,
-				iface->name,
+				(char __user *)iface->name,
 				strlen(iface->name));
 	if (ret != -ENODEV && ret < 0) {
 		ksmbd_err("Failed to set SO_BINDTODEVICE: %d\n", ret);
