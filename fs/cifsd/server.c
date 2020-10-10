@@ -40,7 +40,7 @@ static DEFINE_MUTEX(ctrl_lock);
 
 static int ___server_conf_set(int idx, char *val)
 {
-	if (idx >= sizeof(server_conf.conf))
+	if (idx >= ARRAY_SIZE(server_conf.conf))
 		return -EINVAL;
 
 	if (!val || val[0] == 0x00)
@@ -224,9 +224,9 @@ static void __handle_ksmbd_work(struct ksmbd_work *work,
 			}
 		}
 
-		if ((work->sess && work->sess->sign) ||
+		if (work->sess && (work->sess->sign ||
 		     smb3_11_final_sess_setup_resp(work) ||
-		     conn->ops->is_sign_req(work, command))
+		     conn->ops->is_sign_req(work, command)))
 			conn->ops->set_sign_rsp(work);
 	} while (is_chained_smb2_message(work));
 
