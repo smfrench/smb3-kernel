@@ -419,7 +419,7 @@ static int create_socket(struct interface *iface)
 	ret = sock_setsockopt(ksmbd_socket,
 				SOL_SOCKET,
 				SO_BINDTODEVICE,
-				(char __user *)iface->name,
+				KERNEL_SOCKPTR(iface->name),
 				strlen(iface->name));
 	if (ret != -ENODEV && ret < 0) {
 		ksmbd_err("Failed to set SO_BINDTODEVICE: %d\n", ret);
