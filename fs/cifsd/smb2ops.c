@@ -190,7 +190,7 @@ static struct smb_version_cmds smb2_0_server_cmds[NUMBER_OF_SMB2_COMMANDS] = {
 
 int init_smb2_0_server(struct ksmbd_conn *conn)
 {
-	return -ENOTSUPP;
+	return -EOPNOTSUPP;
 }
 
 /**
