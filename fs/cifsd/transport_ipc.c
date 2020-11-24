@@ -291,6 +291,7 @@ static int ipc_server_config_on_startup(struct ksmbd_startup_request *req)
 	server_conf.ipc_timeout = req->ipc_timeout * HZ;
 	server_conf.deadtime = req->deadtime * SMB_ECHO_INTERVAL;
 	server_conf.share_fake_fscaps = req->share_fake_fscaps;
+	ksmbd_init_domain(req->sub_auth);
 
 	if (req->smb2_max_read)
 		init_smb2_max_read_size(req->smb2_max_read);
