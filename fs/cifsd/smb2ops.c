@@ -36,6 +36,7 @@ static struct smb_version_values smb21_server_values = {
 	.create_durable_size = sizeof(struct create_durable_rsp),
 	.create_mxac_size = sizeof(struct create_mxac_rsp),
 	.create_disk_id_size = sizeof(struct create_disk_id_rsp),
+	.create_posix_size = sizeof(struct create_posix_rsp),
 };
 
 static struct smb_version_values smb30_server_values = {
@@ -61,6 +62,7 @@ static struct smb_version_values smb30_server_values = {
 	.create_durable_v2_size = sizeof(struct create_durable_v2_rsp),
 	.create_mxac_size = sizeof(struct create_mxac_rsp),
 	.create_disk_id_size = sizeof(struct create_disk_id_rsp),
+	.create_posix_size = sizeof(struct create_posix_rsp),
 };
 
 static struct smb_version_values smb302_server_values = {
@@ -86,6 +88,7 @@ static struct smb_version_values smb302_server_values = {
 	.create_durable_v2_size = sizeof(struct create_durable_v2_rsp),
 	.create_mxac_size = sizeof(struct create_mxac_rsp),
 	.create_disk_id_size = sizeof(struct create_disk_id_rsp),
+	.create_posix_size = sizeof(struct create_posix_rsp),
 };
 
 static struct smb_version_values smb311_server_values = {
@@ -111,6 +114,7 @@ static struct smb_version_values smb311_server_values = {
 	.create_durable_v2_size = sizeof(struct create_durable_v2_rsp),
 	.create_mxac_size = sizeof(struct create_mxac_rsp),
 	.create_disk_id_size = sizeof(struct create_disk_id_rsp),
+	.create_posix_size = sizeof(struct create_posix_rsp),
 };
 
 static struct smb_version_ops smb2_0_server_ops = {
