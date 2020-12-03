@@ -1433,10 +1433,32 @@ struct smb_ntacl *ksmbd_vfs_get_sd_xattr(struct dentry *dentry)
 	return ntacl;
 }
 
+struct posix_acl *ksmbd_vfs_posix_acl_alloc(int count, gfp_t flags)
+{
+#if IS_ENABLED(CONFIG_FS_POSIX_ACL)
+	return posix_acl_alloc(count, flags);
+#else
+	return NULL;
+#endif
+}
+
+struct posix_acl *ksmbd_vfs_get_acl(struct inode *inode, int type)
+{
+#if IS_ENABLED(CONFIG_FS_POSIX_ACL)
+	return get_acl(inode, type);
+#else
+	return NULL;
+#endif
+}
+
 int ksmbd_vfs_set_posix_acl(struct inode *inode, int type,
 		struct posix_acl *acl)
 {
+#if IS_ENABLED(CONFIG_FS_POSIX_ACL)
 	return set_posix_acl(inode, type, acl);
+#else
+	return -EOPNOTSUPP;
+#endif
 }
 
 /**
