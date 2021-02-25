@@ -5706,8 +5706,11 @@ static int set_file_basic_info(struct ksmbd_file *fp,
 		if (rc)
 			return -EINVAL;
 
+		inode_lock(inode);
 		setattr_copy(inode, &attrs);
-		mark_inode_dirty(inode);
+		attrs.ia_valid &= ~ATTR_CTIME;
+		rc = notify_change(dentry, &attrs, NULL);
+		inode_unlock(inode);
 	}
 	return 0;
 }
