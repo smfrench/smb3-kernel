@@ -126,7 +126,7 @@ int ksmbd_vfs_inode_permission(struct dentry *dentry, int acc_mode, bool delete)
 	else if (acc_mode == O_RDWR)
 		mask = MAY_READ | MAY_WRITE;
 
-	if (inode_permission(d_inode(dentry), mask | MAY_OPEN))
+	if (inode_permission(&init_user_ns, d_inode(dentry), mask | MAY_OPEN))
 		return -EACCES;
 
 	if (delete) {
@@ -136,7 +136,7 @@ int ksmbd_vfs_inode_permission(struct dentry *dentry, int acc_mode, bool delete)
 		if (!parent)
 			return -EINVAL;
 
-		if (inode_permission(d_inode(parent), MAY_EXEC | MAY_WRITE)) {
+		if (inode_permission(&init_user_ns, d_inode(parent), MAY_EXEC | MAY_WRITE)) {
 			dput(parent);
 			return -EACCES;
 		}
@@ -151,23 +151,23 @@ int ksmbd_vfs_query_maximal_access(struct dentry *dentry, __le32 *daccess)
 
 	*daccess = cpu_to_le32(FILE_READ_ATTRIBUTES | READ_CONTROL);
 
-	if (inode_permission(d_inode(dentry), MAY_OPEN | MAY_WRITE) == 0)
+	if (!inode_permission(&init_user_ns, d_inode(dentry), MAY_OPEN | MAY_WRITE))
 		*daccess |= cpu_to_le32(WRITE_DAC | WRITE_OWNER | SYNCHRONIZE |
 				FILE_WRITE_DATA | FILE_APPEND_DATA |
 				FILE_WRITE_EA | FILE_WRITE_ATTRIBUTES |
 				FILE_DELETE_CHILD);
 
-	if (inode_permission(d_inode(dentry), MAY_OPEN | MAY_READ) == 0)
+	if (!inode_permission(&init_user_ns, d_inode(dentry), MAY_OPEN | MAY_READ))
 		*daccess |= FILE_READ_DATA_LE | FILE_READ_EA_LE;
 
-	if (inode_permission(d_inode(dentry), MAY_OPEN | MAY_EXEC) == 0)
+	if (!inode_permission(&init_user_ns, d_inode(dentry), MAY_OPEN | MAY_EXEC))
 		*daccess |= FILE_EXECUTE_LE;
 
 	parent = dget_parent(dentry);
 	if (!parent)
 		return 0;
 
-	if (inode_permission(d_inode(parent), MAY_EXEC | MAY_WRITE) == 0)
+	if (!inode_permission(&init_user_ns, d_inode(parent), MAY_EXEC | MAY_WRITE))
 		*daccess |= FILE_DELETE_LE;
 	dput(parent);
 	return 0;
@@ -200,7 +200,7 @@ int ksmbd_vfs_create(struct ksmbd_work *work,
 	}
 
 	mode |= S_IFREG;
-	err = vfs_create(d_inode(path.dentry), dentry, mode, true);
+	err = vfs_create(&init_user_ns, d_inode(path.dentry), dentry, mode, true);
 	if (!err) {
 		ksmbd_vfs_inherit_owner(work, d_inode(path.dentry),
 			d_inode(dentry));
@@ -238,7 +238,7 @@ int ksmbd_vfs_mkdir(struct ksmbd_work *work,
 	}
 
 	mode |= S_IFDIR;
-	err = vfs_mkdir(d_inode(path.dentry), dentry, mode);
+	err = vfs_mkdir(&init_user_ns, d_inode(path.dentry), dentry, mode);
 	if (!err) {
 		ksmbd_vfs_inherit_owner(work, d_inode(path.dentry),
 			d_inode(dentry));
@@ -623,12 +623,12 @@ int ksmbd_vfs_remove_file(struct ksmbd_work *work, char *name)
 	}
 
 	if (S_ISDIR(d_inode(dentry)->i_mode)) {
-		err = vfs_rmdir(d_inode(dir), dentry);
+		err = vfs_rmdir(&init_user_ns, d_inode(dir), dentry);
 		if (err && err != -ENOTEMPTY)
 			ksmbd_debug(VFS, "%s: rmdir failed, err %d\n", name,
 				err);
 	} else {
-		err = vfs_unlink(d_inode(dir), dentry, NULL);
+		err = vfs_unlink(&init_user_ns, d_inode(dir), dentry, NULL);
 		if (err)
 			ksmbd_debug(VFS, "%s: unlink failed, err %d\n", name,
 				err);
@@ -682,7 +682,8 @@ int ksmbd_vfs_link(struct ksmbd_work *work,
 		goto out3;
 	}
 
-	err = vfs_link(oldpath.dentry, d_inode(newpath.dentry), dentry, NULL);
+	err = vfs_link(oldpath.dentry, &init_user_ns, d_inode(newpath.dentry),
+			dentry, NULL);
 	if (err)
 		ksmbd_debug(VFS, "vfs_link failed err %d\n", err);
 
@@ -742,12 +743,15 @@ static int __ksmbd_vfs_rename(struct ksmbd_work *work,
 
 	err = -ENOTEMPTY;
 	if (dst_dent != trap_dent && !d_really_is_positive(dst_dent)) {
-		err = vfs_rename(d_inode(src_dent_parent),
-				 src_dent,
-				 d_inode(dst_dent_parent),
-				 dst_dent,
-				 NULL,
-				 0);
+		struct renamedata rd = {
+			.old_mnt_userns	= &init_user_ns,
+			.old_dir	= d_inode(src_dent_parent),
+			.old_dentry	= src_dent,
+			.new_mnt_userns	= &init_user_ns,
+			.new_dir	= d_inode(dst_dent_parent),
+			.new_dentry	= dst_dent,
+		};
+		err = vfs_rename(&rd);
 	}
 	if (err)
 		ksmbd_err("vfs_rename failed err %d\n", err);
@@ -896,7 +900,7 @@ ssize_t ksmbd_vfs_listxattr(struct dentry *dentry, char **list)
 static ssize_t ksmbd_vfs_xattr_len(struct dentry *dentry,
 			   char *xattr_name)
 {
-	return vfs_getxattr(dentry, xattr_name, NULL, 0);
+	return vfs_getxattr(&init_user_ns, dentry, xattr_name, NULL, 0);
 }
 
 /**
@@ -923,7 +927,8 @@ ssize_t ksmbd_vfs_getxattr(struct dentry *dentry,
 	if (!buf)
 		return -ENOMEM;
 
-	xattr_len = vfs_getxattr(dentry, xattr_name, (void *)buf, xattr_len);
+	xattr_len = vfs_getxattr(&init_user_ns, dentry, xattr_name, (void *)buf,
+			xattr_len);
 	if (xattr_len > 0)
 		*xattr_buf = buf;
 	else
@@ -949,7 +954,7 @@ int ksmbd_vfs_setxattr(struct dentry *dentry,
 {
 	int err;
 
-	err = vfs_setxattr(dentry,
+	err = vfs_setxattr(&init_user_ns, dentry,
 			   attr_name,
 			   attr_value,
 			   attr_size,
@@ -1086,7 +1091,7 @@ int ksmbd_vfs_fqar_lseek(struct ksmbd_file *fp, loff_t start, loff_t length,
 
 int ksmbd_vfs_remove_xattr(struct dentry *dentry, char *attr_name)
 {
-	return vfs_removexattr(dentry, attr_name);
+	return vfs_removexattr(&init_user_ns, dentry, attr_name);
 }
 
 void ksmbd_vfs_xattr_free(char *xattr)
@@ -1106,9 +1111,9 @@ int ksmbd_vfs_unlink(struct dentry *dir, struct dentry *dentry)
 	}
 
 	if (S_ISDIR(d_inode(dentry)->i_mode))
-		err = vfs_rmdir(d_inode(dir), dentry);
+		err = vfs_rmdir(&init_user_ns, d_inode(dir), dentry);
 	else
-		err = vfs_unlink(d_inode(dir), dentry, NULL);
+		err = vfs_unlink(&init_user_ns, d_inode(dir), dentry, NULL);
 
 out:
 	inode_unlock(d_inode(dir));
@@ -1635,7 +1640,7 @@ int ksmbd_vfs_set_posix_acl(struct inode *inode, int type,
 		struct posix_acl *acl)
 {
 #if IS_ENABLED(CONFIG_FS_POSIX_ACL)
-	return set_posix_acl(inode, type, acl);
+	return set_posix_acl(&init_user_ns, inode, type, acl);
 #else
 	return -EOPNOTSUPP;
 #endif
@@ -1680,7 +1685,7 @@ int ksmbd_vfs_fill_dentry_attrs(struct ksmbd_work *work,
 	u64 time;
 	int rc;
 
-	generic_fillattr(d_inode(dentry), ksmbd_kstat->kstat);
+	generic_fillattr(&init_user_ns, d_inode(dentry), ksmbd_kstat->kstat);
 
 	time = ksmbd_UnixTimeToNT(ksmbd_kstat->kstat->ctime);
 	ksmbd_kstat->create_time = time;
