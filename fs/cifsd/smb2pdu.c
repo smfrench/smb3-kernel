@@ -7862,6 +7862,9 @@ static void smb20_oplock_break_ack(struct ksmbd_work *work)
 	return;
 
 err_out:
+	opinfo->op_state = OPLOCK_STATE_NONE;
+	wake_up_interruptible_all(&opinfo->oplock_q);
+
 	opinfo_put(opinfo);
 	ksmbd_fd_put(work, fp);
 	smb2_set_err_rsp(work);
@@ -8007,6 +8010,11 @@ static void smb21_lease_break_ack(struct ksmbd_work *work)
 	return;
 
 err_out:
+	opinfo->op_state = OPLOCK_STATE_NONE;
+	wake_up_interruptible_all(&opinfo->oplock_q);
+	atomic_dec(&opinfo->breaking_cnt);
+	wake_up_interruptible_all(&opinfo->oplock_brk);
+
 	opinfo_put(opinfo);
 	smb2_set_err_rsp(work);
 }
