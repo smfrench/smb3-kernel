@@ -254,13 +254,10 @@ int ksmbd_negotiate_smb_dialect(void *buf)
 int ksmbd_init_smb_server(struct ksmbd_work *work)
 {
 	struct ksmbd_conn *conn = work->conn;
-	void *buf = REQUEST_BUF(work);
-	__le32 proto;
 
 	if (conn->need_neg == false)
 		return 0;
 
-	proto = *(__le32 *)((struct smb_hdr *)buf)->Protocol;
 	init_smb3_11_server(conn);
 
 	if (conn->ops->get_cmd_val(work) != SMB_COM_NEGOTIATE)
