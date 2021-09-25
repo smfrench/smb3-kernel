@@ -431,3 +431,28 @@ int smb2_negotiate_request(struct ksmbd_work *work)
 {
 	return ksmbd_smb_negotiate_common(work, SMB2_NEGOTIATE_HE);
 }
+
+/**
+ * ksmbd_smb2_cur_pdu_buflen() - Get len of current SMB2 PDU buffer
+ * This returns the lenght including any possible padding.
+ * @work: smb work containing request buffer
+ */
+unsigned int ksmbd_smb2_cur_pdu_buflen(struct ksmbd_work *work)
+{
+	struct smb2_hdr *hdr = ksmbd_req_buf_next(work);
+	unsigned int buf_len;
+	unsigned int pdu_len;
+
+	if (hdr->NextCommand != 0) {
+		/*
+		 * hdr->NextCommand has already been validated by
+		 * init_chained_smb2_rsp().
+		 */
+		return __le32_to_cpu(hdr->NextCommand);
+	}
+
+	buf_len = get_rfc1002_len(work->request_buf);
+	pdu_len = buf_len - work->next_smb2_rcv_hdr_off;
+	return pdu_len;
+}
+
