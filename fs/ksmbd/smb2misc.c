@@ -336,14 +336,7 @@ int ksmbd_smb2_check_message(struct ksmbd_work *work)
 	struct smb2_hdr *hdr = &pdu->hdr;
 	int command;
 	__u32 clc_len;  /* calculated length */
-	__u32 len = get_rfc1002_len(pdu);
-
-	if (le32_to_cpu(hdr->NextCommand) > 0) {
-		len = le32_to_cpu(hdr->NextCommand);
-	} else if (work->next_smb2_rcv_hdr_off) {
-		len -= work->next_smb2_rcv_hdr_off;
-		len = round_up(len, 8);
-	}
+	__u32 len = ksmbd_smb2_cur_pdu_buflen(work);
 
 	if (check_smb2_hdr(hdr))
 		return 1;
@@ -396,7 +389,7 @@ int ksmbd_smb2_check_message(struct ksmbd_work *work)
 		 * Some windows servers (win2016) will pad also the final
 		 * PDU in a compound to 8 bytes.
 		 */
-		if (ALIGN(clc_len, 8) == len)
+		if (ALIGN(clc_len, 8) == ALIGN(len, 8))
 			return 0;
 
 		/*
