@@ -341,6 +341,9 @@ int ksmbd_smb2_check_message(struct ksmbd_work *work)
 	if (check_smb2_hdr(hdr))
 		return 1;
 
+	if (len < sizeof(struct smb2_pdu))
+		return 1;
+
 	if (hdr->StructureSize != SMB2_HEADER_STRUCTURE_SIZE) {
 		ksmbd_debug(SMB, "Illegal structure size %u\n",
 			    le16_to_cpu(hdr->StructureSize));
