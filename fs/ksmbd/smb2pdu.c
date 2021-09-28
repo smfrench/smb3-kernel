@@ -7373,9 +7373,7 @@ int smb2_ioctl(struct ksmbd_work *work)
 
 	cnt_code = le32_to_cpu(req->CntCode);
 	out_buf_len = le32_to_cpu(req->MaxOutputResponse);
-	out_buf_len =
-		min_t(u32, MAX_STREAM_PROT_LEN - offsetof(struct smb2_ioctl_rsp, Buffer) - 4,
-		      out_buf_len);
+	out_buf_len = min_t(u32, work->response_sz, out_buf_len);
 	in_buf_len = le32_to_cpu(req->InputCount);
 
 	switch (cnt_code) {
