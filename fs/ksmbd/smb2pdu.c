@@ -393,7 +393,6 @@ static void init_chained_smb2_rsp(struct ksmbd_work *work)
 		work->compound_pfid =
 			le64_to_cpu(((struct smb2_create_rsp *)rsp)->
 				PersistentFileId);
-		work->compound_sid = le64_to_cpu(rsp->SessionId);
 	}
 
 	len = get_rfc1002_len(work->response_buf) - work->next_smb2_rsp_hdr_off;
@@ -579,7 +578,6 @@ int smb2_check_user_session(struct ksmbd_work *work)
 	unsigned int cmd = conn->ops->get_cmd_val(work);
 	unsigned long long sess_id;
 
-	work->sess = NULL;
 	/*
 	 * SMB2_ECHO, SMB2_NEGOTIATE, SMB2_SESSION_SETUP command do not
 	 * require a session id, so no need to validate user session's for
@@ -592,11 +590,25 @@ int smb2_check_user_session(struct ksmbd_work *work)
 	if (!ksmbd_conn_good(work))
 		return -EINVAL;
 
+	if (req_hdr->Flags & SMB2_FLAGS_RELATED_OPERATIONS) {
+		if (work->sess) {
+			pr_err("Missing session\n");
+			return -EINVAL;
+		}
+		return 1;
+	}
+
+	work->sess = NULL;
+	work->compound_sid = 0;
+
 	sess_id = le64_to_cpu(req_hdr->SessionId);
+
 	/* Check for validity of user session */
 	work->sess = ksmbd_session_lookup_all(conn, sess_id);
-	if (work->sess)
+	if (work->sess) {
+		work->compound_sid = sess_id;
 		return 1;
+	}
 	ksmbd_debug(SMB, "Invalid user session, Uid %llu\n", sess_id);
 	return -EINVAL;
 }
