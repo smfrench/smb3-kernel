@@ -97,7 +97,6 @@ int smb2_get_ksmbd_tcon(struct ksmbd_work *work)
 	unsigned int cmd = le16_to_cpu(req_hdr->Command);
 	int tree_id;
 
-	work->tcon = NULL;
 	if (cmd == SMB2_TREE_CONNECT_HE ||
 	    cmd ==  SMB2_CANCEL_HE ||
 	    cmd ==  SMB2_LOGOFF_HE) {
@@ -110,13 +109,26 @@ int smb2_get_ksmbd_tcon(struct ksmbd_work *work)
 		return -ENOENT;
 	}
 
+	if (req_hdr->Flags & SMB2_FLAGS_RELATED_OPERATIONS) {
+		if (!work->tcon) {
+			pr_err("Missing tcon\n");
+			return -EINVAL;
+		}
+		return 1;
+	}
+
+	work->tcon = NULL;
+	work->compound_tid = 0;
+
 	tree_id = le32_to_cpu(req_hdr->Id.SyncId.TreeId);
+
 	work->tcon = ksmbd_tree_conn_lookup(work->sess, tree_id);
 	if (!work->tcon) {
 		pr_err("Invalid tid %d\n", tree_id);
 		return -EINVAL;
 	}
 
+	work->compound_tid = tree_id;
 	return 1;
 }
 
