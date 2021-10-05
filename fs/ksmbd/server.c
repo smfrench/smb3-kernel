@@ -101,6 +101,32 @@ static inline int check_conn_state(struct ksmbd_work *work)
 	return 0;
 }
 
+static int check_session_and_tcon(struct ksmbd_work *work)
+{
+	int rc;
+
+	if (work->conn->ops->check_user_session == NULL)
+		return 0;
+
+	rc = work->conn->ops->check_user_session(work);
+	if (rc < 0) {
+		work->conn->ops->set_rsp_status(work,
+						STATUS_USER_SESSION_DELETED);
+		return 1;
+	}
+	if (rc == 0)
+		return 0;
+
+	rc = work->conn->ops->get_ksmbd_tcon(work);
+	if (rc < 0) {
+		work->conn->ops->set_rsp_status(work,
+						STATUS_NETWORK_NAME_DELETED);
+		return 1;
+	}
+
+	return 0;
+}
+
 #define SERVER_HANDLER_CONTINUE		0
 #define SERVER_HANDLER_ABORT		1
 
@@ -115,6 +141,9 @@ static int __process_request(struct ksmbd_work *work, struct ksmbd_conn *conn,
 		return SERVER_HANDLER_CONTINUE;
 
 	if (ksmbd_verify_smb_message(work))
+		return SERVER_HANDLER_ABORT;
+
+	if (check_session_and_tcon(work))
 		return SERVER_HANDLER_ABORT;
 
 	command = conn->ops->get_cmd_val(work);
@@ -182,23 +211,6 @@ static void __handle_ksmbd_work(struct ksmbd_work *work,
 		/* either uid or tid is not correct */
 		conn->ops->set_rsp_status(work, STATUS_INVALID_HANDLE);
 		goto send;
-	}
-
-	if (conn->ops->check_user_session) {
-		rc = conn->ops->check_user_session(work);
-		if (rc < 0) {
-			command = conn->ops->get_cmd_val(work);
-			conn->ops->set_rsp_status(work,
-					STATUS_USER_SESSION_DELETED);
-			goto send;
-		} else if (rc > 0) {
-			rc = conn->ops->get_ksmbd_tcon(work);
-			if (rc < 0) {
-				conn->ops->set_rsp_status(work,
-					STATUS_NETWORK_NAME_DELETED);
-				goto send;
-			}
-		}
 	}
 
 	do {
