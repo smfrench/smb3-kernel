@@ -1680,6 +1680,7 @@ int smb2_set_rsp_credits(struct ksmbd_work *work);
 
 /* smb2 misc functions */
 int ksmbd_smb2_check_message(struct ksmbd_work *work);
+unsigned int ksmbd_smb2_cur_pdu_buflen(struct ksmbd_work *work);
 
 /* smb2 command handlers */
 int smb2_handle_negotiate(struct ksmbd_work *work);
