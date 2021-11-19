@@ -172,12 +172,11 @@ static void
 cifs_mark_tcp_ses_conns_for_reconnect(struct TCP_Server_Info *server,
 				      bool mark_smb_session)
 {
-	unsigned int num_sessions = 0;
+	struct TCP_Server_Info *pserver;
 	struct cifs_ses *ses;
 	struct cifs_tcon *tcon;
 	struct mid_q_entry *mid, *nmid;
 	struct list_head retry_list;
-	struct TCP_Server_Info *pserver;
 
 	server->maxBuf = 0;
 	server->max_read = 0;
@@ -199,17 +198,13 @@ cifs_mark_tcp_ses_conns_for_reconnect(struct TCP_Server_Info *server,
 		if (!mark_smb_session && cifs_chan_needs_reconnect(ses, server))
 			goto next_session;
 
-		if (mark_smb_session)
-			CIFS_SET_ALL_CHANS_NEED_RECONNECT(ses);
-		else
-			cifs_chan_set_need_reconnect(ses, server);
+		cifs_chan_set_need_reconnect(ses, server);
 
 		/* If all channels need reconnect, then tcon needs reconnect */
 		if (!mark_smb_session && !CIFS_ALL_CHANS_NEED_RECONNECT(ses))
 			goto next_session;
 
 		ses->status = CifsNeedReconnect;
-		num_sessions++;
 
 		list_for_each_entry(tcon, &ses->tcon_list, tcon_list) {
 			tcon->need_reconnect = true;
@@ -223,8 +218,6 @@ next_session:
 	}
 	spin_unlock(&cifs_tcp_ses_lock);
 
-	if (num_sessions == 0)
-		return;
 	/*
 	 * Before reconnecting the tcp session, mark the smb session (uid)
 	 * and the tid bad so they are not used until reconnected
