@@ -462,11 +462,8 @@ reconnect_dfs_server(struct TCP_Server_Info *server,
 	dfs_cache_free_tgts(&tl);
 
 	/* Need to set up echo worker again once connection has been established */
-	if (server->tcpStatus == CifsNeedNegotiate) {
+	if (server->tcpStatus == CifsNeedNegotiate)
 		mod_delayed_work(cifsiod_wq, &server->echo, 0);
-		spin_lock(&cifs_tcp_ses_lock);
-	}
-	spin_unlock(&cifs_tcp_ses_lock);
 
 	wake_up(&server->response_q);
 	return rc;

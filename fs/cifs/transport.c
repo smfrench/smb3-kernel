@@ -1262,12 +1262,11 @@ compound_send_recv(const unsigned int xid, struct cifs_ses *ses,
 	 */
 	spin_lock(&cifs_tcp_ses_lock);
 	if ((ses->status == CifsNew) || (optype & CIFS_NEG_OP) || (optype & CIFS_SESS_OP)) {
-		spin_unlock(&cifs_tcp_ses_lock);
-
 		struct kvec iov = {
 			.iov_base = resp_iov[0].iov_base,
 			.iov_len = resp_iov[0].iov_len
 		};
+		spin_unlock(&cifs_tcp_ses_lock);
 		mutex_lock(&server->srv_mutex);
 		smb311_update_preauth_hash(ses, server, &iov, 1);
 		mutex_unlock(&server->srv_mutex);
