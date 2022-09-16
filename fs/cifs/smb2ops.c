@@ -4338,10 +4338,10 @@ crypt_message(struct TCP_Server_Info *server, int num_rqst,
 		return rc;
 	}
 
-	rc = smb3_crypto_aead_allocate(server);
-	if (rc) {
-		cifs_server_dbg(VFS, "%s: crypto alloc failed\n", __func__);
-		return rc;
+	/* sanity check -- TFMs were allocated after negotiate protocol */
+	if (unlikely(!server->secmech.enc || !server->secmech.dec)) {
+		cifs_server_dbg(VFS, "%s: crypto TFMs are NULL\n", __func__);
+		return -EIO;
 	}
 
 	tfm = enc ? server->secmech.enc : server->secmech.dec;

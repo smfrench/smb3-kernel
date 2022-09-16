@@ -927,6 +927,16 @@ SMB2_negotiate(const unsigned int xid,
 	else
 		req->SecurityMode = 0;
 
+	if (req->SecurityMode) {
+		/*
+		 * Allocate HMAC-SHA256 regardless of dialect requested, change to AES-CMAC later,
+		 * if SMB3+ is negotiated
+		 */
+		rc = cifs_alloc_hash("hmac(sha256)",&server->secmech.hmacsha256);
+		if (rc)
+			goto neg_exit;
+	}
+
 	req->Capabilities = cpu_to_le32(server->vals->req_capabilities);
 	if (ses->chan_max > 1)
 		req->Capabilities |= cpu_to_le32(SMB2_GLOBAL_CAP_MULTI_CHANNEL);
@@ -1071,6 +1081,15 @@ SMB2_negotiate(const unsigned int xid,
 	rc = cifs_enable_signing(server, ses->sign);
 	if (rc)
 		goto neg_exit;
+
+	if (server->sign && server->dialect >= SMB30_PROT_ID) {
+		/* free HMAC-SHA256 allocated earlier for negprot */
+		cifs_free_hash(&server->secmech.hmacsha256);
+		rc = cifs_alloc_hash("cmac(aes)", &server->secmech.aes_cmac);
+		if (rc)
+			goto neg_exit;
+	}
+
 	if (blob_length) {
 		rc = decode_negTokenInit(security_blob, blob_length, server);
 		if (rc == 1)

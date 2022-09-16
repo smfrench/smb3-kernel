@@ -1093,7 +1093,7 @@ cifs_alloc_hash(const char *name, struct shash_desc **sdesc)
 		return rc;
 	}
 
-	*sdesc = kmalloc(sizeof(struct shash_desc) + crypto_shash_descsize(alg), GFP_KERNEL);
+	*sdesc = kzalloc(sizeof(struct shash_desc) + crypto_shash_descsize(alg), GFP_KERNEL);
 	if (*sdesc == NULL) {
 		cifs_dbg(VFS, "no memory left to allocate shash TFM '%s'\n", name);
 		crypto_free_shash(alg);

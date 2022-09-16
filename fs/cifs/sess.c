@@ -454,18 +454,6 @@ cifs_ses_add_channel(struct cifs_sb_info *cifs_sb, struct cifs_ses *ses,
 	spin_unlock(&ses->chan_lock);
 
 	mutex_lock(&ses->session_mutex);
-	/*
-	 * We need to allocate the server crypto now as we will need
-	 * to sign packets before we generate the channel signing key
-	 * (we sign with the session key)
-	 */
-	rc = smb311_crypto_shash_allocate(chan->server);
-	if (rc) {
-		cifs_dbg(VFS, "%s: crypto alloc failed\n", __func__);
-		mutex_unlock(&ses->session_mutex);
-		goto out;
-	}
-
 	rc = cifs_negotiate_protocol(xid, ses, chan->server);
 	if (!rc)
 		rc = cifs_setup_session(xid, ses, chan->server, cifs_sb->local_nls);
