@@ -433,6 +433,12 @@ cifs_negotiate(const unsigned int xid,
 		if (rc == -EAGAIN)
 			rc = -EHOSTDOWN;
 	}
+
+	if (!rc) {
+		rc = cifs_alloc_hash("md5", &server->secmech.sign.shash);
+		if (!rc)
+			rc = cifs_alloc_hash("md5", &server->secmech.verify.shash);
+	}
 	return rc;
 }
 

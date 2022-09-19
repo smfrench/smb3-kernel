@@ -932,9 +932,15 @@ SMB2_negotiate(const unsigned int xid,
 		 * Allocate HMAC-SHA256 regardless of dialect requested, change to AES-CMAC later,
 		 * if SMB3+ is negotiated
 		 */
-		rc = cifs_alloc_hash("hmac(sha256)",&server->secmech.hmacsha256);
+		rc = cifs_alloc_hash("hmac(sha256)", &server->secmech.sign);
 		if (rc)
 			goto neg_exit;
+
+		rc = cifs_alloc_hash("hmac(sha256)", &server->secmech.verify);
+		if (rc) {
+			cifs_free_hash(&server->secmech.sign);
+			goto neg_exit;
+		}
 	}
 
 	req->Capabilities = cpu_to_le32(server->vals->req_capabilities);
@@ -1084,10 +1090,17 @@ SMB2_negotiate(const unsigned int xid,
 
 	if (server->sign && server->dialect >= SMB30_PROT_ID) {
 		/* free HMAC-SHA256 allocated earlier for negprot */
-		cifs_free_hash(&server->secmech.hmacsha256);
-		rc = cifs_alloc_hash("cmac(aes)", &server->secmech.aes_cmac);
+		cifs_free_hash(&server->secmech.sign);
+		cifs_free_hash(&server->secmech.verify);
+		rc = cifs_alloc_hash("cmac(aes)", &server->secmech.sign);
 		if (rc)
 			goto neg_exit;
+
+		rc = cifs_alloc_hash("cmac(aes)", &server->secmech.verify);
+		if (rc) {
+			cifs_free_hash(&server->secmech.sign);
+			goto neg_exit;
+		}
 	}
 
 	if (blob_length) {
@@ -1660,8 +1673,26 @@ SMB2_sess_auth_rawntlmssp_authenticate(struct SMB2_sess_data *sess_data)
 	}
 
 	rc = SMB2_sess_establish_session(sess_data);
-#ifdef CONFIG_CIFS_DEBUG_DUMP_KEYS
+	if (rc)
+		goto out;
+
 	if (ses->server->dialect < SMB30_PROT_ID) {
+		rc = crypto_shash_setkey(server->secmech.sign->tfm,
+					 ses->auth_key.response, SMB2_NTLMV2_SESSKEY_SIZE);
+		if (rc) {
+			cifs_dbg(VFS, "%s: Failed to set HMAC-SHA256 signing key, rc=%d\n",
+				 __func__, rc);
+			goto out;
+		}
+
+		rc = crypto_shash_setkey(server->secmech.verify->tfm,
+					 ses->auth_key.response, SMB2_NTLMV2_SESSKEY_SIZE);
+		if (rc) {
+			cifs_dbg(VFS, "%s: Failed to set HMAC-SHA256 verify key, rc=%d\n",
+				 __func__, rc);
+			goto out;
+		}
+#ifdef CONFIG_CIFS_DEBUG_DUMP_KEYS
 		cifs_dbg(VFS, "%s: dumping generated SMB2 session keys\n", __func__);
 		/*
 		 * The session id is opaque in terms of endianness, so we can't
@@ -1673,8 +1704,10 @@ SMB2_sess_auth_rawntlmssp_authenticate(struct SMB2_sess_data *sess_data)
 			 SMB2_NTLMV2_SESSKEY_SIZE, ses->auth_key.response);
 		cifs_dbg(VFS, "Signing Key   %*ph\n",
 			 SMB3_SIGN_KEY_SIZE, ses->auth_key.response);
+#else /* CONFIG_CIFS_DEBUG_DUMP_KEYS */
+		memzero_explicit(ses->auth_key.response, SMB2_NTLMV2_SESSKEY_SIZE);
+#endif /* !CONFIG_CIFS_DEBUG_DUMP_KEYS */
 	}
-#endif
 out:
 	kfree(ntlmssp_blob);
 	SMB2_sess_free_buffer(sess_data);

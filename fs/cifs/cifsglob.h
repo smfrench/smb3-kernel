@@ -153,14 +153,27 @@ struct session_key {
 	char *response;
 };
 
-/* crypto hashing related structure/fields, not specific to a sec mech */
+/**
+ * cifs_secmech - Crypto hashing related structure/fields, not specific to one mechanism
+ * @sign: SHASH descriptor to allocate a hashing TFM for signing requests
+ * @verify: SHASH descriptor to allocate a hashing TFM for verifying requests' signatures
+ * @enc: AEAD TFM for SMB3+ encryption
+ * @dec: AEAD TFM for SMB3+ decryption
+ *
+ * @sign and @verify are allocated per-server, and the negotiated connection dialect will dictate
+ * which algorithm to use:
+ * - MD5 for SMB1
+ * - HMAC-SHA256 for SMB2
+ * - AES-CMAC for SMB3
+ *
+ * @enc and @dec holds the encryption/decryption TFMs, where it'll be either AES-CCM or AES-GCM.
+ */
 struct cifs_secmech {
-	struct shash_desc *md5; /* md5 hash function, for CIFS/SMB1 signatures */
-	struct shash_desc *hmacsha256; /* hmac-sha256 hash function, for SMB2 signatures */
-	struct shash_desc *aes_cmac; /* block-cipher based MAC function, for SMB3 signatures */
+	struct shash_desc *sign;
+	struct shash_desc *verify;
 
-	struct crypto_aead *enc; /* smb3 encryption AEAD TFM (AES-CCM and AES-GCM) */
-	struct crypto_aead *dec; /* smb3 decryption AEAD TFM (AES-CCM and AES-GCM) */
+	struct crypto_aead *enc;
+	struct crypto_aead *dec;
 };
 
 /* per smb session structure/fields */

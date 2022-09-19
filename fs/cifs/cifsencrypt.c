@@ -95,32 +95,33 @@ int __cifs_calc_signature(struct smb_rqst *rqst,
  * the sequence number before this function is called. Also, this function
  * should be called with the server->srv_mutex held.
  */
-static int cifs_calc_signature(struct smb_rqst *rqst,
-			struct TCP_Server_Info *server, char *signature)
+static int cifs_calc_signature(struct smb_rqst *rqst, struct TCP_Server_Info *server,
+			       char *signature, bool verify)
 {
+	struct shash_desc *shash = NULL;
 	int rc;
 
 	if (!rqst->rq_iov || !signature || !server)
 		return -EINVAL;
 
-	rc = cifs_alloc_hash("md5", &server->secmech.md5);
-	if (rc)
-		return -1;
+	if (verify)
+		shash = server->secmech.verify;
+	else
+		shash = server->secmech.sign;
 
-	rc = crypto_shash_init(server->secmech.md5);
+	rc = crypto_shash_init(shash);
 	if (rc) {
 		cifs_dbg(VFS, "%s: Could not init md5\n", __func__);
 		return rc;
 	}
 
-	rc = crypto_shash_update(server->secmech.md5,
-		server->session_key.response, server->session_key.len);
+	rc = crypto_shash_update(shash, server->session_key.response, server->session_key.len);
 	if (rc) {
 		cifs_dbg(VFS, "%s: Could not update with response\n", __func__);
 		return rc;
 	}
 
-	return __cifs_calc_signature(rqst, server, signature, server->secmech.md5);
+	return __cifs_calc_signature(rqst, server, signature, shash);
 }
 
 /* must be called with server->srv_mutex held */
@@ -158,7 +159,7 @@ int cifs_sign_rqst(struct smb_rqst *rqst, struct TCP_Server_Info *server,
 	*pexpected_response_sequence_number = ++server->sequence_number;
 	++server->sequence_number;
 
-	rc = cifs_calc_signature(rqst, server, smb_signature);
+	rc = cifs_calc_signature(rqst, server, smb_signature, false);
 	if (rc)
 		memset(cifs_pdu->Signature.SecuritySignature, 0, 8);
 	else
@@ -234,7 +235,7 @@ int cifs_verify_signature(struct smb_rqst *rqst,
 	cifs_pdu->Signature.Sequence.Reserved = 0;
 
 	cifs_server_lock(server);
-	rc = cifs_calc_signature(rqst, server, what_we_think_sig_should_be);
+	rc = cifs_calc_signature(rqst, server, what_we_think_sig_should_be, true);
 	cifs_server_unlock(server);
 
 	if (rc)
@@ -705,9 +706,8 @@ calc_seckey(struct cifs_ses *ses)
 void
 cifs_crypto_secmech_release(struct TCP_Server_Info *server)
 {
-	cifs_free_hash(&server->secmech.aes_cmac);
-	cifs_free_hash(&server->secmech.hmacsha256);
-	cifs_free_hash(&server->secmech.md5);
+	cifs_free_hash(&server->secmech.sign);
+	cifs_free_hash(&server->secmech.verify);
 
 	if (server->secmech.enc) {
 		crypto_free_aead(server->secmech.enc);
