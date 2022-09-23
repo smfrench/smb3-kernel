@@ -460,7 +460,7 @@ static unsigned int
 build_signing_ctxt(struct smb2_signing_capabilities *pneg_ctxt)
 {
 	unsigned int ctxt_len = sizeof(struct smb2_signing_capabilities);
-	unsigned short num_algs = 1; /* number of signing algorithms sent */
+	unsigned short num_algs = 2; /* number of signing algorithms sent */
 
 	pneg_ctxt->ContextType = SMB2_SIGNING_CAPABILITIES;
 	/*
@@ -471,12 +471,19 @@ build_signing_ctxt(struct smb2_signing_capabilities *pneg_ctxt)
 				sizeof(struct smb2_neg_context) +
 				(num_algs * 2 /* sizeof u16 */), 8) * 8);
 	pneg_ctxt->SigningAlgorithmCount = cpu_to_le16(num_algs);
-	pneg_ctxt->SigningAlgorithms[0] = cpu_to_le16(SIGNING_ALG_AES_CMAC);
+
+	/*
+	 * Hint (set as first) the server that we prefer AES-GMAC, but there's no guarantee it'll
+	 * be used, e.g. server might not support it.
+	 * MS-SMB2 2.2.3.1.7
+	 */
+	pneg_ctxt->SigningAlgorithms[0] = SIGNING_ALG_AES_GMAC_LE;
+	pneg_ctxt->SigningAlgorithms[1] = SIGNING_ALG_AES_CMAC_LE;
+	/* SMB 3.1.1 doesn't accept HMAC-SHA256, so no need to send it */
 
 	ctxt_len += 2 /* sizeof le16 */ * num_algs;
 	ctxt_len = DIV_ROUND_UP(ctxt_len, 8) * 8;
 	return ctxt_len;
-	/* TBD add SIGNING_ALG_AES_GMAC and/or SIGNING_ALG_HMAC_SHA256 */
 }
 
 static void
@@ -715,7 +722,7 @@ static void decode_signing_ctx(struct TCP_Server_Info *server,
 		pr_warn_once("Invalid signing algorithm count\n");
 		return;
 	}
-	if (le16_to_cpu(pctxt->SigningAlgorithms[0]) > 2) {
+	if (le16_to_cpu(pctxt->SigningAlgorithms[0]) > SIGNING_ALG_AES_GMAC) {
 		pr_warn_once("unknown signing algorithm\n");
 		return;
 	}
@@ -784,6 +791,7 @@ static int smb311_decode_neg_context(struct smb2_negotiate_rsp *rsp,
 		offset += clen + sizeof(struct smb2_neg_context);
 		len_of_ctxts -= clen;
 	}
+
 	return rc;
 }
 
@@ -926,22 +934,6 @@ SMB2_negotiate(const unsigned int xid,
 		req->SecurityMode = cpu_to_le16(SMB2_NEGOTIATE_SIGNING_ENABLED);
 	else
 		req->SecurityMode = 0;
-
-	if (req->SecurityMode) {
-		/*
-		 * Allocate HMAC-SHA256 regardless of dialect requested, change to AES-CMAC later,
-		 * if SMB3+ is negotiated
-		 */
-		rc = cifs_alloc_hash("hmac(sha256)", &server->secmech.sign);
-		if (rc)
-			goto neg_exit;
-
-		rc = cifs_alloc_hash("hmac(sha256)", &server->secmech.verify);
-		if (rc) {
-			cifs_free_hash(&server->secmech.sign);
-			goto neg_exit;
-		}
-	}
 
 	req->Capabilities = cpu_to_le32(server->vals->req_capabilities);
 	if (ses->chan_max > 1)
@@ -1087,22 +1079,6 @@ SMB2_negotiate(const unsigned int xid,
 	rc = cifs_enable_signing(server, ses->sign);
 	if (rc)
 		goto neg_exit;
-
-	if (server->sign && server->dialect >= SMB30_PROT_ID) {
-		/* free HMAC-SHA256 allocated earlier for negprot */
-		cifs_free_hash(&server->secmech.sign);
-		cifs_free_hash(&server->secmech.verify);
-		rc = cifs_alloc_hash("cmac(aes)", &server->secmech.sign);
-		if (rc)
-			goto neg_exit;
-
-		rc = cifs_alloc_hash("cmac(aes)", &server->secmech.verify);
-		if (rc) {
-			cifs_free_hash(&server->secmech.sign);
-			goto neg_exit;
-		}
-	}
-
 	if (blob_length) {
 		rc = decode_negTokenInit(security_blob, blob_length, server);
 		if (rc == 1)
@@ -1112,12 +1088,35 @@ SMB2_negotiate(const unsigned int xid,
 	}
 
 	if (rsp->DialectRevision == cpu_to_le16(SMB311_PROT_ID)) {
+		server->signing_algorithm = SIGNING_ALG_AES_CMAC;
+		server->signing_negotiated = false;
+
 		if (rsp->NegotiateContextCount)
 			rc = smb311_decode_neg_context(rsp, server,
 						       rsp_iov.iov_len);
 		else
 			cifs_server_dbg(VFS, "Missing expected negotiate contexts\n");
+
+		/*
+		 * Some servers will not send a SMB2_SIGNING_CAPABILITIES context response (*),
+		 * so use AES-CMAC signing algorithm as it is expected to be accepted.
+		 * See MS-SMB2 note <125> Section 3.2.4.2.2.2
+		 */
+		if (!server->signing_negotiated)
+			cifs_dbg(VFS, "signing capabilities were not negotiated, using "
+				 "AES-CMAC for message signing\n");
+	} else if (server->dialect >= SMB30_PROT_ID) {
+		server->signing_algorithm = SIGNING_ALG_AES_CMAC;
+	} else if (server->dialect >= SMB20_PROT_ID) {
+		server->signing_algorithm = SIGNING_ALG_HMAC_SHA256;
 	}
+
+	rc = smb2_init_secmechs(server);
+	if (rc) {
+		cifs_dbg(VFS, "Failed to initialize secmechs, rc=%d\n", rc);
+		goto neg_exit;
+	}
+
 neg_exit:
 	free_rsp_buf(resp_buftype, rsp);
 	return rc;
@@ -1677,18 +1676,13 @@ SMB2_sess_auth_rawntlmssp_authenticate(struct SMB2_sess_data *sess_data)
 		goto out;
 
 	if (ses->server->dialect < SMB30_PROT_ID) {
-		rc = crypto_shash_setkey(server->secmech.sign->tfm,
+		rc = crypto_shash_setkey(server->secmech.sign.shash->tfm,
 					 ses->auth_key.response, SMB2_NTLMV2_SESSKEY_SIZE);
+		if (!rc)
+			rc = crypto_shash_setkey(server->secmech.verify.shash->tfm,
+						 ses->auth_key.response, SMB2_NTLMV2_SESSKEY_SIZE);
 		if (rc) {
-			cifs_dbg(VFS, "%s: Failed to set HMAC-SHA256 signing key, rc=%d\n",
-				 __func__, rc);
-			goto out;
-		}
-
-		rc = crypto_shash_setkey(server->secmech.verify->tfm,
-					 ses->auth_key.response, SMB2_NTLMV2_SESSKEY_SIZE);
-		if (rc) {
-			cifs_dbg(VFS, "%s: Failed to set HMAC-SHA256 verify key, rc=%d\n",
+			cifs_dbg(VFS, "%s: Failed to set HMAC-SHA256 signing keys, rc=%d\n",
 				 __func__, rc);
 			goto out;
 		}

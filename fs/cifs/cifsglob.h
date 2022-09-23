@@ -153,24 +153,49 @@ struct session_key {
 	char *response;
 };
 
+struct smb_rqst;
+struct TCP_Server_Info;
 /**
  * cifs_secmech - Crypto hashing related structure/fields, not specific to one mechanism
- * @sign: SHASH descriptor to allocate a hashing TFM for signing requests
- * @verify: SHASH descriptor to allocate a hashing TFM for verifying requests' signatures
+ * @sign.shash: SHASH descriptor for signing TFM
+ * @sign.aead: AEAD TFM for signing
+ * @sign_wait: Completion struct for signing operations
+ * @verify.shash: SHASH descriptor for verifying TFM
+ * @verify.aead: AEAD TFM for verifying
+ * @verify_wait: Completion struct for verifying operations
+ * @calc_signature: Signature calculation function to be used.
  * @enc: AEAD TFM for SMB3+ encryption
  * @dec: AEAD TFM for SMB3+ decryption
  *
- * @sign and @verify are allocated per-server, and the negotiated connection dialect will dictate
- * which algorithm to use:
+ * @sign and @verify TFMs are allocated per-server, and the negotiated dialect will dictate which
+ * algorithm to use:
  * - MD5 for SMB1
  * - HMAC-SHA256 for SMB2
  * - AES-CMAC for SMB3
+ * - AES-GMAC for SMB3.1.1
  *
- * @enc and @dec holds the encryption/decryption TFMs, where it'll be either AES-CCM or AES-GCM.
+ * The completion structs @sign_wait and @verify_wait are required so that we can serialize access
+ * to the AEAD TFMs, since they're asynchronous by design.  Using a stack-allocated structure could
+ * cause concurrent access to the TFMs to overwrite the completion status of a previous operation.
+ * This is subject to change if the need to add a mutex arises.
+ *
+ * @enc and @dec holds the encryption/decryption TFMs, also allocated per server, where each will
+ * be either AES-CCM or AES-GCM.
  */
 struct cifs_secmech {
-	struct shash_desc *sign;
-	struct shash_desc *verify;
+	union {
+		struct shash_desc *shash;
+		struct crypto_aead *aead;
+	} sign;
+	struct crypto_wait sign_wait;
+
+	union {
+		struct shash_desc *shash;
+		struct crypto_aead *aead;
+	} verify;
+	struct crypto_wait verify_wait;
+
+	int (*calc_signature)(struct smb_rqst *rqst, struct TCP_Server_Info *server, bool verify);
 
 	struct crypto_aead *enc;
 	struct crypto_aead *dec;
@@ -445,8 +470,6 @@ struct smb_version_operations {
 	void (*new_lease_key)(struct cifs_fid *);
 	int (*generate_signingkey)(struct cifs_ses *ses,
 				   struct TCP_Server_Info *server);
-	int (*calc_signature)(struct smb_rqst *, struct TCP_Server_Info *,
-				bool allocate_crypto);
 	int (*set_integrity)(const unsigned int, struct cifs_tcon *tcon,
 			     struct cifsFileInfo *src_file);
 	int (*enum_snapshots)(const unsigned int xid, struct cifs_tcon *tcon,

@@ -4234,42 +4234,30 @@ static inline void smb2_sg_set_buf(struct scatterlist *sg, const void *buf,
 	sg_set_page(sg, addr, buflen, offset_in_page(buf));
 }
 
-/* Assumes the first rqst has a transform header as the first iov.
- * I.e.
- * rqst[0].rq_iov[0]  is transform header
- * rqst[0].rq_iov[1+] data to be encrypted/decrypted
- * rqst[1+].rq_iov[0+] data to be encrypted/decrypted
- */
-static struct scatterlist *
-init_sg(int num_rqst, struct smb_rqst *rqst, u8 *sign)
+struct scatterlist *
+smb3_init_sg(int num_rqst, struct smb_rqst *rqst, u8 *sign)
 {
 	unsigned int sg_len;
 	struct scatterlist *sg;
 	unsigned int i;
 	unsigned int j;
 	unsigned int idx = 0;
-	int skip;
 
 	sg_len = 1;
 	for (i = 0; i < num_rqst; i++)
 		sg_len += rqst[i].rq_nvec + rqst[i].rq_npages;
 
-	sg = kmalloc_array(sg_len, sizeof(struct scatterlist), GFP_KERNEL);
+	sg = kcalloc(sg_len, sizeof(struct scatterlist), GFP_KERNEL);
 	if (!sg)
 		return NULL;
 
 	sg_init_table(sg, sg_len);
 	for (i = 0; i < num_rqst; i++) {
 		for (j = 0; j < rqst[i].rq_nvec; j++) {
-			/*
-			 * The first rqst has a transform header where the
-			 * first 20 bytes are not part of the encrypted blob
-			 */
-			skip = (i == 0) && (j == 0) ? 20 : 0;
 			smb2_sg_set_buf(&sg[idx++],
-					rqst[i].rq_iov[j].iov_base + skip,
-					rqst[i].rq_iov[j].iov_len - skip);
-			}
+					rqst[i].rq_iov[j].iov_base,
+					rqst[i].rq_iov[j].iov_len);
+		}
 
 		for (j = 0; j < rqst[i].rq_npages; j++) {
 			unsigned int len, offset;
@@ -4325,7 +4313,15 @@ crypt_message(struct TCP_Server_Info *server, int num_rqst,
 		crypt_len += SMB2_SIGNATURE_SIZE;
 	}
 
-	sg = init_sg(num_rqst, rqst, sign);
+	/* Skip the first 20 bytes of the first iov of the first request as they're not part of the
+	 * encrypted blob */
+	rqst[0].rq_iov[0].iov_base += 20;
+	rqst[0].rq_iov[0].iov_len -= 20;
+	sg = smb3_init_sg(num_rqst, rqst, sign);
+	/* Rewind those 20 bytes before going any further */
+	rqst[0].rq_iov[0].iov_base -= 20;
+	rqst[0].rq_iov[0].iov_len += 20;
+
 	if (!sg) {
 		cifs_server_dbg(VFS, "%s: Failed to init sg\n", __func__);
 		rc = -ENOMEM;
@@ -5213,7 +5209,6 @@ struct smb_version_operations smb20_operations = {
 	.get_lease_key = smb2_get_lease_key,
 	.set_lease_key = smb2_set_lease_key,
 	.new_lease_key = smb2_new_lease_key,
-	.calc_signature = smb2_calc_signature,
 	.is_read_op = smb2_is_read_op,
 	.set_oplock_level = smb2_set_oplock_level,
 	.create_lease_buf = smb2_create_lease_buf,
@@ -5314,7 +5309,6 @@ struct smb_version_operations smb21_operations = {
 	.get_lease_key = smb2_get_lease_key,
 	.set_lease_key = smb2_set_lease_key,
 	.new_lease_key = smb2_new_lease_key,
-	.calc_signature = smb2_calc_signature,
 	.is_read_op = smb21_is_read_op,
 	.set_oplock_level = smb21_set_oplock_level,
 	.create_lease_buf = smb2_create_lease_buf,
@@ -5421,7 +5415,6 @@ struct smb_version_operations smb30_operations = {
 	.set_lease_key = smb2_set_lease_key,
 	.new_lease_key = smb2_new_lease_key,
 	.generate_signingkey = generate_smb30signingkey,
-	.calc_signature = smb2_calc_signature,
 	.set_integrity  = smb3_set_integrity,
 	.is_read_op = smb21_is_read_op,
 	.set_oplock_level = smb3_set_oplock_level,
@@ -5535,7 +5528,6 @@ struct smb_version_operations smb311_operations = {
 	.set_lease_key = smb2_set_lease_key,
 	.new_lease_key = smb2_new_lease_key,
 	.generate_signingkey = generate_smb311signingkey,
-	.calc_signature = smb2_calc_signature,
 	.set_integrity  = smb3_set_integrity,
 	.is_read_op = smb21_is_read_op,
 	.set_oplock_level = smb3_set_oplock_level,

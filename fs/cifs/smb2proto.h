@@ -14,6 +14,7 @@
 
 struct statfs;
 struct smb_rqst;
+struct crypto_aead;
 
 /*
  *****************************************************************
@@ -37,6 +38,7 @@ extern struct mid_q_entry *smb2_setup_request(struct cifs_ses *ses,
 					      struct smb_rqst *rqst);
 extern struct mid_q_entry *smb2_setup_async_request(
 			struct TCP_Server_Info *server, struct smb_rqst *rqst);
+extern int smb2_init_secmechs(struct TCP_Server_Info *server);
 extern struct cifs_ses *smb2_find_smb_ses(struct TCP_Server_Info *server,
 					   __u64 ses_id);
 extern struct cifs_tcon *smb2_find_smb_tcon(struct TCP_Server_Info *server,
@@ -44,6 +46,10 @@ extern struct cifs_tcon *smb2_find_smb_tcon(struct TCP_Server_Info *server,
 extern int smb2_calc_signature(struct smb_rqst *rqst,
 				struct TCP_Server_Info *server,
 				bool verify);
+extern int smb311_calc_signature(struct smb_rqst *rqst,
+				 struct TCP_Server_Info *server,
+				 bool verify);
+extern struct scatterlist *smb3_init_sg(int num_rqst, struct smb_rqst *rqst, u8 *sign);
 extern void smb2_echo_request(struct work_struct *work);
 extern __le32 smb2_get_lease_state(struct cifsInodeInfo *cinode);
 extern bool smb2_is_valid_oplock_break(char *buffer,
@@ -99,7 +105,8 @@ extern int smb2_unlock_range(struct cifsFileInfo *cfile,
 			     struct file_lock *flock, const unsigned int xid);
 extern int smb2_push_mandatory_locks(struct cifsFileInfo *cfile);
 extern void smb2_reconnect_server(struct work_struct *work);
-extern int smb3_crypto_aead_allocate(struct TCP_Server_Info *server);
+extern int smb3_crypto_aead_allocate(const char *name, struct crypto_aead **tfm);
+extern void smb3_crypto_aead_free(struct crypto_aead **tfm);
 extern unsigned long smb_rqst_len(struct TCP_Server_Info *server,
 				  struct smb_rqst *rqst);
 extern void smb2_set_next_command(struct cifs_tcon *tcon,

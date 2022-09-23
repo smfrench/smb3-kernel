@@ -23,6 +23,7 @@
 #include <linux/fips.h>
 #include "../smbfs_common/arc4.h"
 #include <crypto/aead.h>
+#include "smb2proto.h"
 
 int __cifs_calc_signature(struct smb_rqst *rqst,
 			struct TCP_Server_Info *server, char *signature,
@@ -105,9 +106,9 @@ static int cifs_calc_signature(struct smb_rqst *rqst, struct TCP_Server_Info *se
 		return -EINVAL;
 
 	if (verify)
-		shash = server->secmech.verify;
+		shash = server->secmech.verify.shash;
 	else
-		shash = server->secmech.sign;
+		shash = server->secmech.sign.shash;
 
 	rc = crypto_shash_init(shash);
 	if (rc) {
@@ -706,16 +707,14 @@ calc_seckey(struct cifs_ses *ses)
 void
 cifs_crypto_secmech_release(struct TCP_Server_Info *server)
 {
-	cifs_free_hash(&server->secmech.sign);
-	cifs_free_hash(&server->secmech.verify);
-
-	if (server->secmech.enc) {
-		crypto_free_aead(server->secmech.enc);
-		server->secmech.enc = NULL;
+	if (server->signing_algorithm == SIGNING_ALG_AES_GMAC) {
+		smb3_crypto_aead_free(&server->secmech.sign.aead);
+		smb3_crypto_aead_free(&server->secmech.verify.aead);
+	} else {
+		cifs_free_hash(&server->secmech.sign.shash);
+		cifs_free_hash(&server->secmech.verify.shash);
 	}
 
-	if (server->secmech.dec) {
-		crypto_free_aead(server->secmech.dec);
-		server->secmech.dec = NULL;
-	}
+	smb3_crypto_aead_free(&server->secmech.enc);
+	smb3_crypto_aead_free(&server->secmech.dec);
 }
