@@ -732,8 +732,8 @@ static void decode_signing_ctx(struct TCP_Server_Info *server,
 
 	server->signing_negotiated = true;
 	server->signing_algorithm = le16_to_cpu(pctxt->SigningAlgorithms[0]);
-	cifs_dbg(FYI, "signing algorithm %d chosen\n",
-		     server->signing_algorithm);
+	cifs_dbg(FYI, "negotiated signing algorithm '%s'\n",
+		 smb2_signing_algo_str(server->signing_algorithm));
 }
 
 

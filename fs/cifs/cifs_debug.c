@@ -13,6 +13,7 @@
 #include <linux/uaccess.h>
 #include "cifspdu.h"
 #include "cifsglob.h"
+#include "smb2glob.h"
 #include "cifsproto.h"
 #include "cifs_debug.h"
 #include "cifsfs.h"
@@ -354,7 +355,8 @@ skip_rdma:
 		else if (server->compress_algorithm == SMB3_COMPRESS_LZ77_HUFF)
 			seq_printf(m, " COMPRESS_LZ77_HUFF");
 		if (server->sign)
-			seq_printf(m, " signed");
+			seq_printf(m, " signed (%s)",
+				   smb2_signing_algo_str(server->signing_algorithm));
 		if (server->posix_ext_supported)
 			seq_printf(m, " posix");
 		if (server->nosharesock)
@@ -405,7 +407,8 @@ skip_rdma:
 			if (ses->session_flags & SMB2_SESSION_FLAG_ENCRYPT_DATA)
 				seq_puts(m, " encrypted");
 			if (ses->sign)
-				seq_puts(m, " signed");
+				seq_printf(m, " signed (%s)",
+				   smb2_signing_algo_str(server->signing_algorithm));
 
 			seq_printf(m, "\n\tUser: %d Cred User: %d",
 				   from_kuid(&init_user_ns, ses->linux_uid),
