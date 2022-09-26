@@ -610,13 +610,16 @@ assemble_neg_contexts(struct smb2_negotiate_req *req,
 		neg_context_count++;
 	}
 
-	if (enable_negotiate_signing) {
-		ctxt_len = build_signing_ctxt((struct smb2_signing_capabilities *)
-				pneg_ctxt);
-		*total_len += ctxt_len;
-		pneg_ctxt += ctxt_len;
-		neg_context_count++;
-	}
+	if (!enable_negotiate_signing)
+		pr_warn_once("cifs.ko loaded with param 'enable_negotiate_signing=0', but this "
+			     "parameter is deprecated and ignored. Trying to negotiate signing "
+			     "capabilities anyway...\n");
+
+	ctxt_len = build_signing_ctxt((struct smb2_signing_capabilities *)
+			pneg_ctxt);
+	*total_len += ctxt_len;
+	pneg_ctxt += ctxt_len;
+	neg_context_count++;
 
 	/* check for and add transport_capabilities and signing capabilities */
 	req->NegotiateContextCount = cpu_to_le16(neg_context_count);

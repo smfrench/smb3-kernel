@@ -65,7 +65,7 @@ bool lookupCacheEnabled = true;
 bool disable_legacy_dialects; /* false by default */
 bool enable_gcm_256 = true;
 bool require_gcm_256; /* false by default */
-bool enable_negotiate_signing; /* false by default */
+bool enable_negotiate_signing = true; /* deprecated -- always true now */
 unsigned int global_secflags = CIFSSEC_DEF;
 /* unsigned int ntlmv2_support = 0; */
 unsigned int sign_CIFS_PDUs = 1;
@@ -133,8 +133,12 @@ MODULE_PARM_DESC(enable_gcm_256, "Enable requesting strongest (256 bit) GCM encr
 module_param(require_gcm_256, bool, 0644);
 MODULE_PARM_DESC(require_gcm_256, "Require strongest (256 bit) GCM encryption. Default: n/N/0");
 
+/* XXX: remove this at some point */
 module_param(enable_negotiate_signing, bool, 0644);
-MODULE_PARM_DESC(enable_negotiate_signing, "Enable negotiating packet signing algorithm with server. Default: n/N/0");
+MODULE_PARM_DESC(enable_negotiate_signing,
+		 "(deprecated) Enable negotiating packet signing algorithm with the server. "
+		 "Default: always y/Y/1. Changing this setting no longer has any effect, cifs.ko "
+		 "will always try to negotiate the signing algorithm on SMB 3.1.1 mounts.");
 
 module_param(disable_legacy_dialects, bool, 0644);
 MODULE_PARM_DESC(disable_legacy_dialects, "To improve security it may be "
