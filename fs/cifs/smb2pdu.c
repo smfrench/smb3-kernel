@@ -362,6 +362,9 @@ fill_small_buf(__le16 smb2_command, struct cifs_tcon *tcon,
 	/*
 	 * smaller than SMALL_BUFFER_SIZE but bigger than fixed area of
 	 * largest operations (Create)
+	 *
+	 * Note that the last 8 bytes of the small buffer are reserved for padding when required
+	 * (see SMB2_PADDING_BUF in smb2ops.c)
 	 */
 	memset(buf, 0, 256);
 
@@ -3001,8 +3004,7 @@ SMB2_open_free(struct smb_rqst *rqst)
 	if (rqst && rqst->rq_iov) {
 		cifs_small_buf_release(rqst->rq_iov[0].iov_base);
 		for (i = 1; i < rqst->rq_nvec; i++)
-			if (rqst->rq_iov[i].iov_base != smb2_padding)
-				kfree(rqst->rq_iov[i].iov_base);
+			kfree(rqst->rq_iov[i].iov_base);
 	}
 }
 
@@ -3195,8 +3197,7 @@ SMB2_ioctl_free(struct smb_rqst *rqst)
 	if (rqst && rqst->rq_iov) {
 		cifs_small_buf_release(rqst->rq_iov[0].iov_base); /* request */
 		for (i = 1; i < rqst->rq_nvec; i++)
-			if (rqst->rq_iov[i].iov_base != smb2_padding)
-				kfree(rqst->rq_iov[i].iov_base);
+			kfree(rqst->rq_iov[i].iov_base);
 	}
 }
 

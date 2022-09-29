@@ -2323,7 +2323,10 @@ smb2_set_related(struct smb_rqst *rqst)
 	shdr->Flags |= SMB2_FLAGS_RELATED_OPERATIONS;
 }
 
-char smb2_padding[7] = {0, 0, 0, 0, 0, 0, 0};
+/*
+ * Use the last 8 bytes of the small buf as the padding buffer, when necessary
+ */
+#define SMB2_PADDING_BUF(buf) (buf + MAX_CIFS_SMALL_BUFFER_SIZE - 8)
 
 void
 smb2_set_next_command(struct cifs_tcon *tcon, struct smb_rqst *rqst)
@@ -2352,7 +2355,7 @@ smb2_set_next_command(struct cifs_tcon *tcon, struct smb_rqst *rqst)
 		 * If we do not have encryption then we can just add an extra
 		 * iov for the padding.
 		 */
-		rqst->rq_iov[rqst->rq_nvec].iov_base = smb2_padding;
+		rqst->rq_iov[rqst->rq_nvec].iov_base = SMB2_PADDING_BUF(rqst->rq_iov[0].iov_base);
 		rqst->rq_iov[rqst->rq_nvec].iov_len = num_padding;
 		rqst->rq_nvec++;
 		len += num_padding;

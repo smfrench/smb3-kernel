@@ -371,8 +371,6 @@ struct smb2_file_id_extd_directory_info {
 	char FileName[1];
 } __packed; /* level 60 */
 
-extern char smb2_padding[7];
-
 /* equivalent of the contents of SMB3.1.1 POSIX open context response */
 struct create_posix_rsp {
 	u32 nlink;
