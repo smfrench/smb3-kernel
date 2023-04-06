@@ -972,6 +972,7 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 			goto cifs_parse_mount_err;
 		ctx->linux_uid = uid;
 		ctx->uid_specified = true;
+		ctx->override_uid = 1;
 		break;
 	case Opt_cruid:
 		uid = make_kuid(current_user_ns(), result.uint_32);
@@ -1000,6 +1001,7 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 			goto cifs_parse_mount_err;
 		ctx->linux_gid = gid;
 		ctx->gid_specified = true;
+		ctx->override_gid = 1;
 		break;
 	case Opt_port:
 		ctx->port = result.uint_32;
