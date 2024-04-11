@@ -34,6 +34,7 @@ struct ksmbd_tree_connect {
 	atomic_t			refcount;
 	wait_queue_head_t		refcount_q;
 	unsigned int			t_state;
+	unsigned int			t_cap;
 };
 
 struct ksmbd_tree_conn_status {
