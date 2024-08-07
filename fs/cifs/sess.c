@@ -309,7 +309,6 @@ cifs_ses_add_channel(struct cifs_sb_info *cifs_sb, struct cifs_ses *ses,
 
 	chan_server = cifs_get_tcp_session(&ctx, ses->server);
 
-	mutex_lock(&ses->session_mutex);
 	spin_lock(&ses->chan_lock);
 	chan = &ses->chans[ses->chan_count];
 	chan->server = chan_server;
@@ -327,6 +326,7 @@ cifs_ses_add_channel(struct cifs_sb_info *cifs_sb, struct cifs_ses *ses,
 
 	spin_unlock(&ses->chan_lock);
 
+	mutex_lock(&ses->session_mutex);
 	/*
 	 * We need to allocate the server crypto now as we will need
 	 * to sign packets before we generate the channel signing key
@@ -335,12 +335,15 @@ cifs_ses_add_channel(struct cifs_sb_info *cifs_sb, struct cifs_ses *ses,
 	rc = smb311_crypto_shash_allocate(chan->server);
 	if (rc) {
 		cifs_dbg(VFS, "%s: crypto alloc failed\n", __func__);
+		mutex_unlock(&ses->session_mutex);
 		goto out;
 	}
 
 	rc = cifs_negotiate_protocol(xid, ses, chan->server);
 	if (!rc)
 		rc = cifs_setup_session(xid, ses, chan->server, cifs_sb->local_nls);
+
+	mutex_unlock(&ses->session_mutex);
 
 out:
 	if (rc && chan->server) {
@@ -355,8 +358,6 @@ out:
 		WARN_ON(ses->chan_count < 1);
 		spin_unlock(&ses->chan_lock);
 	}
-
-	mutex_unlock(&ses->session_mutex);
 
 	if (rc && chan->server)
 		cifs_put_tcp_session(chan->server, 0);
@@ -1055,6 +1056,7 @@ sess_establish_session(struct sess_data *sess_data)
 
 	/* Even if one channel is active, session is in good state */
 	spin_lock(&cifs_tcp_ses_lock);
+	server->tcpStatus = CifsGood;
 	ses->status = CifsGood;
 	spin_unlock(&cifs_tcp_ses_lock);
 
