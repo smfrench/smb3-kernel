@@ -115,7 +115,13 @@ enum statusEnum {
 	CifsGood,
 	CifsExiting,
 	CifsNeedReconnect,
-	CifsNeedNegotiate
+	CifsNeedNegotiate,
+	CifsInNegotiate,
+	CifsNeedSessSetup,
+	CifsInSessSetup,
+	CifsNeedTcon,
+	CifsInTcon,
+	CifsInFilesInvalidate
 };
 
 enum securityEnum {
