@@ -1,0 +1,240 @@
+2102ed90f7890 smb: client: don't try following DFS links in cifs_tree_connect()
+7a135fd49c3e7 smb: client: memcpy() with surrounding object base address
+bd74bc9b3a8c5 smb3.1.1: fix posix mounts to older servers
+ccf435caa314c fs/smb/client: cifs_prime_dcache() for SMB3 POSIX reparse points
+136fca78a66d7 fs/smb/client: Implement new SMB3 POSIX type
+439224eb2f5ba fs/smb/client: avoid querying SMB2_OP_QUERY_WSL_EA for SMB3 POSIX
+5fab8abc2c276 cifs: unlock on error in smb3_reconfigure()
+880a661e67648 cifs: during remount, make sure passwords are in sync
+625e2357c8fcf smb: Initialize cfid->tcon before performing network ops
+24891e0ebca53 cifs: Fix parsing reparse point with native symlink in SMB1 non-UNICODE session
+430afd3edabf9 cifs: Fix parsing native symlinks relative to the export
+e061482601b4f smb: client: disable directory caching when dir_cache_timeout is zero
+73934e535cffb smb: During unmount, ensure all cached dir instances drop their dentry
+791f833053578 smb: prevent use-after-free due to open_cached_dir error paths
+31fabf70d5838 smb: Don't leak cfid when reconnect races with open_cached_dir
+921d90907eb97 smb: client: handle max length for SMB symlinks
+83cb4fb72d643 smb3: request handle caching when caching directories
+46f8e25926817 smb: client: fix NULL ptr deref in crypto_aead_setkey()
+185f065f458b7 cifs: support mounting with alternate password to allow password rotation
+ebe0f8dc243e4 smb: cached directories can be more than root file handle
+e8c7149418115 smb: client: Fix use-after-free of network namespace.
+34c0344e7eac5 cifs: Fix creating native symlinks pointing to current or parent directory
+201430d21faab cifs: Improve creating native symlinks pointing to directory
+7013af5bbd281 smb: client: set correct device number on nfs reparse points
+bbc258dcdbfe5 smb: client: fix parsing of device numbers
+35dbac8c328d6 smb: client: Handle kstrdup failures for passwords
+6d52db315cfc6 cifs: Validate content of NFS reparse point buffer
+b209c3a0bc3ac smb: client: fix OOBs when building SMB2_IOCTL request
+b1813c220b76f smb: client: fix possible double free in smb2_set_ea()
+0809fb86ad13b smb: client: fix UAF in async decryption
+3374f06f95442 smb3: fix incorrect mode displayed for read-only files
+472973229cb01 smb: client: use actual path when queryfs
+2c3c1f87cf7e1 cifs: Do not convert delimiter when parsing NFS-style symlinks
+c6db81c550cea cifs: Fix buffer overflow when parsing NFS reparse points
+e4c886dd24a31 cifs: Remove intermediate object of failed create reparse call
+fabc4ed200f9b smb: client: fix hang in wait_for_response() for negproto
+b9d510e085040 cifs: Fix signature miscalculation
+b27ea9c96efd2 smb: client: fix double put of @cfile in smb2_rename_path()
+0a9423f99ded3 cifs: Fix FALLOC_FL_ZERO_RANGE to preflush buffered part of target region
+5a72d1edb0843 smb: client: fix double put of @cfile in smb2_set_path_size()
+77e5d743a8cf0 smb: client: fix FSCTL_GET_REPARSE_POINT against NetApp
+288d398df80cf cifs: Fix FALLOC_FL_PUNCH_HOLE support
+a01859dd6aebf smb/client: avoid dereferencing rdata=NULL in smb2_new_read_req()
+0fa4b4aadb2b1 smb: client: ignore unhandled reparse tags
+c7cd840b8e2b4 smb3: fix setting SecurityFlags when encryption is required
+c0f767dea583b cifs: cifs_inval_name_dfs_link_error: correct the check for fullpath
+0397a48c4bd67 smb: client: handle lack of FSCTL_GET_REPARSE_POINT support
+f2d6c5b8ef116 cifs: mount with "unix" mount option for SMB1 incorrectly handled
+31553d20b4220 cifs: fix reconnect with SMB1 UNIX Extensions
+160235efb4f9b cifs: fix potential null pointer use in destroy_workqueue in init_cifs error path
+16380f52b7216 mm: page_ref: remove folio_try_get_rcu()
+c15682ed16c13 cifs: fix noisy message on copy_file_range
+d59ccdc4ab4d7 ksmbd: return FILE_DEVICE_DISK instead of super magic
+87f3ceb2b1431 cifs: fix setting SecurityFlags to true
+450df994f32a3 cifs: fix typo in module parameter enable_gcm_256
+225de871ddf99 smb: client: fix deadlock in smb2_find_smb_tcon()
+d4a079d1466d6 smb: smb2pdu.h: Avoid -Wflex-array-member-not-at-end warnings
+07e76ea1799c1 cifs: Add tracing for the cifs_tcon struct refcounting
+2004e41cd2c41 smb: client: instantiate when creating SFU files
+01bce099af0f8 smb: client: fix NULL ptr deref in cifs_mark_open_handles_for_deleted_file()
+dbd2df36cd676 smb3: add trace event for mknod
+8aff8b8b177d2 smb311: additional compression flag defined in updated protocol spec
+a9aa7a776efcf smb311: correct incorrect offset field in compression header
+c1f3c8204e6f1 cifs: Move some extern decls from .c files to .h
+8b2326963da77 cifs: remove redundant variable assignment
+1598a015c7610 cifs: fixes for get_inode_info
+91cdeb0d4baf7 cifs: defer close file handles having RH lease
+eb4a05e3c34b5 smb: common: simplify compression headers
+fdd938b2b468d smb: common: fix fields sizes in compression_pattern_payload_v1
+e8aee4f4d2e30 smb: client: negotiate compression algorithms
+25f3604fcd628 smb3: add dynamic trace point for ioctls
+c057a809e128e smb: client: return reparse type in /proc/mounts
+582524019459e smb: client: set correct d_type for reparse DFS/DFSR and mount point
+97db416045554 smb: client: parse uid, gid, mode and dev from WSL reparse points
+7449d736bbbd1 smb: client: introduce SMB2_OP_QUERY_WSL_EA
+b93ac66fa2361 smb: client: Fix a NULL vs IS_ERR() check in wsl_set_xattrs()
+df0a8a1925100 smb: client: add support for WSL reparse points
+831ffbd1c7b5e smb: client: reduce number of parameters in smb2_compound_op()
+84c597f7f98ce smb: client: fix potential broken compound request
+db0f1c0770bc2 smb: client: move most of reparse point handling code to common file
+c1468c7e0ab95 smb: client: introduce reparse mount option
+1e60bc0e95438 smb: client: retry compound request without reusing lease
+b6e27f7fc2456 smb: client: do not defer close open handles to deleted files
+f93d145f90028 smb: client: reuse file lease key in compound operations
+cfb8f73da6013 smb: client: get rid of smb311_posix_query_path_info()
+a90f37e3d7acf smb: client: parse owner/group when creating reparse points
+e4232010b13ae smb3: update allocation size more accurately on write completion
+fff4045e712b3 smb: client: handle path separator of created SMB symlinks
+1b5f2928cc6be cifs: update the same create_guid on replay
+cdd7870a5fd56 cifs: set replay flag for retries of write command
+433042a91f937 cifs: commands that are retried should have replay flag set
+a5df7820310b4 smb: client: delete "true", "false" defines
+b4ca2942a0a41 cifs: new mount option called retrans
+de2cadf4bffad smb: client: don't clobber ->i_rdev from cached reparse points
+6789c8387676a cifs: new nt status codes from MS-SMB2
+b96ea433fff45 cifs: pick channel for tcon and tdis
+36f8070c9bdb4 cifs: minor comment cleanup
+8358f46bef22c cifs: remove redundant variable tcon_exist
+42430638ace69 cifs: remove unneeded return statement
+8e6a3999e6d5d cifs: get rid of dup length check in parse_reparse_point()
+774c6452475e5 cifs: Pass unbyteswapped eof value into SMB2_set_eof()
+88e07de246fa1 smb3: Improve exception handling in allocate_mr_list()
+d53fcb485f4b8 cifs: fix in logging in cifs_chan_update_iface
+304ff3c1b07c4 smb: client: handle special files and symlinks in SMB3 POSIX
+870c73abef4bc smb: client: cleanup smb2_query_reparse_point()
+00ecebcb86d86 smb: client: allow creating symlinks via reparse points
+a158bb66b1373 smb: client: optimise reparse point querying
+02bcf865cc532 smb: client: allow creating special files via reparse points
+886b7fb4556dd smb: client: extend smb2_compound_op() to accept more commands
+da70c1d3c5843 smb: client: Fix minor whitespace errors and warnings
+abea3c9ac8c6e smb: client: introduce cifs_sfu_make_node()
+a7b537b3be9f7 cifs: fix use after free for iface while disabling secondary channels
+bb536892dadd9 Missing field not being returned in ioctl CIFS_IOC_GET_MNT_INFO
+210c8b9d496e6 smb3: minor cleanup of session handling code
+cc3035d092ebf smb3: more minor cleanups for session handling routines
+b74c8d9be35a3 smb3: minor RDMA cleanup
+9c88aae1e44c4 cifs: print server capabilities in DebugData
+69a1669a6ba1c smb: use crypto_shash_digest() in symlink_hash()
+5b3c76351b493 Add definition for new smb3.1.1 command type
+c5c63108a8682 SMB3: clarify some of the unused CreateOption flags
+6bd52f41d8047 cifs: Add client version details to NTLM authenticate message
+08bedfbc1b507 smb3: fix broken reconnect when password changing on the server by allowing password rotation
+699f8958dece1 smb3: fix lock ordering potential deadlock in cifs_sync_mid_result
+0fcf7e219448e smb3: missing lock when picking channel
+39ad3d61d23e0 smb: client: Fix struct_group() usage in __packed structs
+fc1860a1bf6cf cifs: reinstate original behavior again for forceuid/forcegid
+551496743a570 smb: client: fix rename(2) regression against samba
+4a5c16d065939 cifs: Fix reacquisition of volume cookie on still-live connection
+3b629239773b0 ksmbd: common: use struct_group_attr instead of struct_group for network_open_info
+488d4cbc6f28d smb: client: refresh referral without acquiring refpath_lock
+645f332c6b634 smb: client: guarantee refcounted children from parent session
+441786be0c197 smb3: show beginning time for per share stats
+6202996a1c188 smb: client: fix UAF in smb2_reconnect_server()
+fe1bad73d35f2 smb: client: remove extra @chan_count check in __cifs_put_smb_ses()
+05eedb5abc077 smb3: fix Open files on server counter going negative
+2cfff21732132 smb: client: fix potential UAF in cifs_signal_cifsd_for_reconnect()
+aa582b33f9445 smb: client: fix potential UAF in smb2_is_network_name_deleted()
+0a15ba88a32fa smb: client: fix potential UAF in is_valid_oplock_break()
+f92739fdd4522 smb: client: fix potential UAF in smb2_is_valid_lease_break()
+21fed37d2bdcd smb: client: fix potential UAF in smb2_is_valid_oplock_break()
+10e17ca4000ec smb: client: fix potential UAF in cifs_dump_full_key()
+c3cf8b74c5792 smb: client: fix potential UAF in cifs_stats_proc_show()
+cf03020c56d3e smb: client: fix potential UAF in cifs_stats_proc_write()
+a65f2b56334ba smb: client: fix potential UAF in cifs_debug_files_proc_show()
+6f17163b9339f smb3: retrying on failed server close
+ba55f8a995f6b smb: client: serialise cifs_construct_tcon() with cifs_mount_mutex
+9b2ee27e8de59 smb: client: handle DFS tcons in cifs_construct_tcon()
+0fdada1ef5b10 cifs: Fix caching to try to do open O_WRONLY as rdwr on server
+614bc8c71ed5a cifs: Fix duplicate fscache cookie warnings
+da2911798f25d cifs: open_cached_dir(): add FILE_READ_EA to desired access
+997b0c26d3fa6 cifs: reduce warning log level for server not advertising interfaces
+0845cb6bbf151 cifs: make cifs_chan_update_iface() a void function
+4501f9cd36c1e cifs: delete unnecessary NULL checks in cifs_chan_update_iface()
+db3a3e6fa33e4 cifs: do not let cifs_chan_update_iface deallocate channels
+66c2940c9614f cifs: make sure server interfaces are requested only for SMB3+
+407ced4e770eb cifs: add xid to query server interface call
+7e8cffa4f85e6 cifs: allow changing password during remount
+9179aa27039af cifs: prevent updating file size from server if we have a read/write lease
+b9e741ac2b7ca smb: client: stop revalidating reparse points unnecessarily
+e45deec35bf7f cifs: Fix writeback data corruption
+d3c792357cda8 cifs: Don't use certain unnecessary folio_*() functions
+2e411c57562f8 smb: do not test the return value of folio_start_writeback()
+824c15ad0910f smb3: add missing null server pointer check
+c5e3ec783484a smb3: clarify mount warning
+dd40cbafb1d2e cifs: handle cases where multiple sessions share connection
+cd743cfead99f cifs: change tcon status when need_reconnect is set on it
+cacc0a9c34a82 smb: client: set correct d_type for reparse points under DFS mounts
+2fdb5551e35b0 smb: client: increase number of PDUs allowed in a compound request
+2b1f28ee49dad cifs: do not search for channel if server is terminating
+567f1b1da5dad cifs: make sure that channel scaling is done only once
+f642fcf3f7e65 cifs: helper function to check replayable error codes
+c09de6bb3ada8 cifs: translate network errors on send to -ECONNABORTED
+59e04d39fc299 cifs: cifs_pick_channel should try selecting active channels
+8fbefa7a755d3 smb: Work around Clang __bdos() type confusion
+8d76726eeb11b cifs: open_cached_dir should not rely on primary channel
+4145ccff546ea smb: Fix regression in writes when non-standard maximum write size negotiated
+c2aa2718cda2d smb: client: set correct id, uid and cruid for multiuser automounts
+f7ff1c89fb6e9 cifs: fix underflow in parse_server_interfaces()
+cff97d683a083 cifs: failure to add channel on iface should bump up weight
+fb708025b1f10 cifs: avoid redundant calls to disable multichannel
+8c944f8a4139e smb: client: fix hardlinking of reparse points
+c586b0c7466ec smb: client: fix renaming of reparse points
+d69a84cbbc30c cifs: fix stray unlock in cifs_chan_skip_or_disable
+14bafd1980664 cifs: after disabling multichannel, mark tcon for reconnect
+fe8c187fc22f8 cifs: fix a pending undercount of srv_count
+30b1d56452ecc cifs: fix lock ordering while disabling multichannel
+cc29591dacdf5 cifs: update iface_last_update on each query-and-update
+50e8363ecc85d cifs: handle servers that still advertise multichannel after disabling
+07e864089a0e4 cifs: reconnect worker should take reference on server struct unconditionally
+3a0ef868fb8aa Revert "cifs: reconnect work should have reference on server struct"
+3e1615361b6fa cifs: handle when server stops supporting multichannel
+5075e9f4e0461 cifs: handle when server starts supporting multichannel
+173ddac64b472 cifs: reconnect work should have reference on server struct
+c395f798a7f2e cifs: handle cases where a channel is closed
+38298acb7899b smb: client: fix parsing of SMB3.1.1 POSIX create context
+c5e0ed716c52f smb: client: fix potential OOB in smb2_dump_detail()
+5ca518149d464 smb: client, common: fix fortify warnings
+30aae98b75b40 cifs: do not depend on release_iface for maintaining iface_list
+40fc7dfd17ecd cifs: cifs_chan_is_iface_active should be called with chan_lock held
+9a49874443307 fs: cifs: Fix atime update check
+23171df51f601 client: convert to new timestamp accessors
+3c1e602a34e1e ksmbd: send v2 lease break notification for directory
+ac48fcef5ec2e smb: client: fix OOB in smbCalcSize()
+3b5f0d0a2bf07 smb: client: fix OOB in SMB2_query_info_init()
+6630441cc2e8f smb: client: fix potential OOB in cifs_dump_detail()
+c0e98de95072f smb: client: fix OOB in cifsd when receiving compounded resps
+e72ed491bc6ef smb: client: fix OOB in smb2_query_reparse_point()
+ef748d4a62a78 smb: client: fix NULL deref in asn1_ber_decoder()
+17a0f64cc02d4 smb: client: fix potential OOBs in smb2_parse_contexts()
+534733397da26 smb: client: fix OOB in receive_encrypted_standard()
+df32e887d32b8 smb: client: set correct file type from NFS reparse points
+4d07e5df13877 smb: client: introduce ->parse_reparse_point()
+d5c959a1dba6b smb: client: implement ->query_reparse_point() for SMB1
+f94c44342f0a5 ksmbd: fix wrong name of SMB2_CREATE_ALLOCATION_SIZE
+43801359c8971 cifs: Fix flushing, invalidation and file size with FICLONE
+63c80f574a8ee cifs: Fix flushing, invalidation and file size with copy_file_range()
+5ac34ba42e9ab smb: client: fix potential NULL deref in parse_dfs_referrals()
+1bcb08e39d845 cifs: Fix non-availability of dedup breaking generic/304
+1de3dbd9a0213 smb: client: report correct st_size for SMB and NFS symlinks
+b6abe3380977e smb: client: fix missing mode bits for SMB symlinks
+514f89a35904e cifs: Fix FALLOC_FL_INSERT_RANGE by setting i_size after EOF moved
+9b7e8fa648143 cifs: Fix FALLOC_FL_ZERO_RANGE by setting i_size if EOF moved
+4875ef3e606bf cifs: fix leak of iface for primary channel
+d0b5a680a8ba1 cifs: account for primary channel in the interface list
+1cd8c353708de cifs: distribute channels across interfaces based on speed
+0c00e422bf3de cifs: Fix encryption of cleared, but unset rq_iter data buffers
+739bf98ce9dee cifs: do not pass cifs_sb when trying to add channels
+328004e6df5a9 cifs: do not reset chan_max if multichannel is not supported at mount
+aabf4851d1605 cifs: force interface update before a fresh session setup
+e42c5730c14a9 cifs: reconnect helper should set reconnect for the right channel
+390c08fd3eeb3 smb: client: fix mount when dns_resolver key is not available
+c1a5962f1462b smb: client: fix potential deadlock when releasing mids
+93877b9afc299 smb: client: fix use-after-free in smb2_query_info_compound()
+0ab6f842452ce smb: client: fix use-after-free bug in cifs_debug_data_proc_show()
+318e1c7e61c42 smb3: fix caching of ctime on setxattr
+67062c84922b4 smb3: allow dumping session and tcon id to improve stats analysis and debugging
+b8c0124b2340a smb3: fix touch -h of symlink
+d612032717662 smb3: fix creating FIFOs when mounting with "sfu" mount option
+35867052aa591 cifs: fix check of rc in function generate_smb3signingkey
+6641ac164a045 cifs: spnego: add ';' in HOST_KEY_LEN

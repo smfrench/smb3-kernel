@@ -1,0 +1,213 @@
+193 smb3 client (cifs.ko) changesets from 6.9-rc6 to 6.13-rc1
+
+   B: the 50 fs/smb/client fs/smb/common changesets that were already included in 6.6.32 stable
+   N: changesets that were not backported (e.g. due to dependencies outside fs/smb) 
+   R: changesets to be added to the stable backports that needed to be rebased
+   A: changesets added to the backport that didn't need to be rebased
+   E: Likely important - prioritize for inclusion in stable backport
+   
+E	28ab8ec89b75 smb3.1.1: fix posix mounts to older servers
+E	8cb0bc543635 fs/smb/client: cifs_prime_dcache() for SMB3 POSIX reparse points
+E	6a832bc8bbb2 fs/smb/client: Implement new SMB3 POSIX type
+E	ca4b2c460743 fs/smb/client: avoid querying SMB2_OP_QUERY_WSL_EA for SMB3 POSIX
+                  **** 6.13-rc1 ****
+E	8d7690b3c146 cifs: update internal version number
+B	cda88d2fef7a cifs: unlock on error in smb3_reconfigure()
+B	0f0e35790295 cifs: during remount, make sure passwords are in sync
+B	b9aef1b13a0a cifs: support mounting with alternate password to allow password rotation
+B	c353ee4fb119 smb: Initialize cfid->tcon before performing network ops
+B	3fa640d035e5 smb: During unmount, ensure all cached dir instances drop their dentry
+	796733054e4a smb: client: fix noisy message when mounting shares
+E	36008fe6e3dc smb: client: don't try following DFS links in cifs_tree_connect()
+E	e1481075981d smb: client: allow reconnect when sending ioctl
+	b2fe4a8fa0f6 smb: client: get rid of @nlsc param in cifs_tree_connect()
+	28ec614f2f9b smb: client: allow more DFS referrals to be cached
+B	f4ca4f5a36ea cifs: Fix parsing reparse point with native symlink in SMB1 non-UNICODE session
+	1f48660667ef cifs: Validate content of WSL reparse point buffers
+	d3d797e32653 cifs: Improve guard for excluding $LXDEV xattr
+	06a7adf318a3 cifs: Add support for parsing WSL-style symlinks
+	dd26bc067e44 cifs: Validate content of native symlink
+B	723f4ef90452 cifs: Fix parsing native symlinks relative to the export
+B	4bdec0d1f658 smb: client: fix NULL ptr deref in crypto_aead_setkey()
+	ab02d8774181 Update misleading comment in cifs_chan_update_iface
+	07bdf9272a01 smb: client: change return value in open_cached_dir_by_dentry() if !cfids
+B	ceaf1451990e smb: client: disable directory caching when dir_cache_timeout is zero
+	f6e88838400d smb: client: remove unnecessary checks in open_cached_dir()
+B	a9685b409a03 smb: prevent use-after-free due to open_cached_dir error paths
+B	7afb86733685 smb: Don't leak cfid when reconnect races with open_cached_dir
+B	0812340811e4 smb: client: handle max length for SMB symlinks
+	9f544d26b15b smb: client: get rid of bounds check in SMB2_ioctl_init()
+	bc925c1216f0 smb: client: improve compound padding in encryption
+B	9ed9d83a51a9 smb3: request handle caching when caching directories
+	0d6b0d2e3816 cifs: Recognize SFU char/block devices created by Windows NFS server on Windows Server <<2012
+E (priority)	db363b0a1d9e CIFS: New mount option for cifs.upcall namespace resolution
+E	7a2158b73c36 smb/client: Prevent error pointer dereference
+E	d413eabff18d fs/smb/client: implement chmod() for SMB3 POSIX Extensions
+B	128630e1dbec smb: cached directories can be more than root file handle
+E	343d7fe6df9e smb: client: fix use-after-free of signing key
+	7460bf441656 smb: client: Use str_yes_no() helper function
+	f69b0187f874 smb: client: memcpy() with surrounding object base address
+	6c9903c330ab cifs: Remove pre-historic unused CIFSSMBCopy
+B	ef7134c7fc48 smb: client: Fix use-after-free of network namespace.
+	9bd812744db2 convert cifs_ioctl_copychunk()
+	               **** 6.12 kernel ****
+	2ce1007f42b8 cifs: fix warning when destroy 'cifs_io_request_pool'
+B	9a5dd6115139 smb: client: Handle kstrdup failures for passwords
+	6aca91c416f6 cifs: Remove unused functions
+	3dfea293f427 smb/client: Fix logically dead code
+B	1ab60323c520 smb: client: fix OOBs when building SMB2_IOCTL request
+E	B19ebc1e6cab3 smb: client: fix possible double free in smb2_set_ea()
+B	63271b7d569f cifs: Fix creating native symlinks pointing to current or parent directory
+B	3eb40512530e cifs: Improve creating native symlinks pointing to directory
+B	d3a49f609173 cifs: Do not convert delimiter when parsing NFS-style symlinks
+B	556ac52bb1e7 cifs: Validate content of NFS reparse point buffer
+B	e2a8910af016 cifs: Fix buffer overflow when parsing NFS reparse points
+	e9f49feefb4b smb: client: Correct typos in multiple comments across various files
+	5f60d5f6bbc1 move asm/unaligned.h to linux/unaligned.h
+B	a421e3fe0e6a smb: client: use actual path when queryfs
+B	c9432ad5e32f cifs: Remove intermediate object of failed create reparse call
+	1eecd880a3ff Revert "smb: client: make SHA-512 TFM ephemeral"
+	dd0d7edb866d smb: Update comments about some reparse point tags
+	a9023656bcd2 cifs: Check for UTF-16 null codepoint in SFU symlink target location
+	220d83b52c7d smb: client: make SHA-512 TFM ephemeral
+	db44ca9f7bc0 smb: client: make HMAC-MD5 TFM ephemeral
+E	a13ca780afab smb: client: stop flooding dmesg in smb2_calc_signature()
+	f7025d861694 smb: client: allocate crypto only for primary server
+B	b0abcd65ec54 smb: client: fix UAF in async decryption
+	9e676e571d39 ksmbd: Correct typos in multiple comments across various files
+	387676fabf15 cifs: update internal version number
+	6c7f1b994a02 smb: client: print failed session logoffs with FYI
+	307f77e7f585 cifs: Fix reversion of the iter in cifs_readv_receive().
+B	2f3017e7cc75 smb3: fix incorrect mode displayed for read-only files
+B	663f295e3559 smb: client: fix parsing of device numbers
+B	a9de67336a4a smb: client: set correct device number on nfs reparse points
+E	4e3ba580f5ab smb: client: propagate error from cifs_construct_tcon()
+E	0826b134c0b0 smb: client: fix DFS failover in multiuser mounts
+	85633c00ad03 cifs: Make the write_{enter,done,err} tracepoints display netfs info
+E	4f42a8b54b5c smb: client: fix DFS interlink failover
+	9190cc0c97aa smb: client: improve purging of cached referrals
+	242d23efc987 smb: client: avoid unnecessary reconnects when refreshing referrals
+	5ac1f99fdd09 smb: client: fix compression heuristic functions
+	37408843f2ae cifs: Update SFU comments about fifos and sockets
+	41d3f256c6a5 cifs: Add support for creating SFU symlinks
+	43a64bd02f93 cifs: Remove redundant setting of NETFS_SREQ_HIT_EOF
+	dc1a456dc187 cifs: Fix cifs readv callback merge resolution issue
+	21dcbc17eba3 smb: use LIST_HEAD() to simplify code
+	2ba0d8947efd cifs: Recognize SFU socket type
+	25f6bd0fb016 cifs: Show debug message when SFU Fifo type was detected
+	bb68327053a2 cifs: Put explicit zero byte into SFU block/char types
+	cf2ce67345d6 cifs: Add support for reading SFU symlink location
+	89c601ab7cb3 cifs: Fix recognizing SFU symlinks
+	9b4af913465c smb: client: compress: fix an "illegal accesses" issue
+	590efcd3c75f smb: client: compress: fix a potential issue of freeing an invalid pointer
+	94ae8c3fee94 smb: client: compress: LZ77 code improvements cleanup
+	f046d71e84e1 smb: client: insert compression check/call on write requests
+	d14bbfff259c smb3: mark compression as CONFIG_EXPERIMENTAL and fix missing compression operation
+	6795dab40392 cifs: Remove obsoleted declaration for cifs_dir_open
+	25e68c37caf2 smb: client: Use min() macro
+	9290038be2f9 cifs: convert to use ERR_CAST()
+	e2fcd3fa0351 smb: add comment to STATUS_MCA_OCCURED
+	78181a5504a4 smb: move SMB2 Status code to common header file
+	b51174da743b smb: move some duplicate definitions to common/smbacl.h
+	09bedafc1e2c smb/client: rename cifs_ace to smb_ace
+	251b93ae7380 smb/client: rename cifs_acl to smb_acl
+	7f599d8fb3e0 smb/client: rename cifs_sid to smb_sid
+	3651487607ae smb/client: rename cifs_ntsd to smb_ntsd
+B	5a20b7cb0d8d cifs: Fix signature miscalculation
+	4aa571d67e81 cifs: Don't support ITER_XARRAY
+	a2906d3316fc cifs: Switch crypto buffer to use a folio_queue rather than an xarray
+	2982c8c19bab cifs: Use iterate_and_advance*() routines directly for hashing
+	ee4cdf7ba857 netfs: Speed up buffered reading
+	c45ebd636c32 cifs: Provide the capability to extract from ITER_FOLIOQ to RDMA SGEs
+	52d55922e0f1 netfs: Move max_len/max_nr_segs from netfs_io_subrequest to netfs_io_stream
+	73425800ac94 netfs, cifs: Move CIFS_INO_MODIFIED_ATTR to netfs_inode
+	ab8521891072 netfs, cifs: Improve some debugging bits
+	a68c74865f51 cifs: Fix SMB1 readv/writev callback in the same way as SMB2/3
+	517b58c1f924 cifs: Fix zero_point init on inode initialisation
+B	f9c169b51b6c smb: client: fix double put of @cfile in smb2_set_path_size()
+B	3523a3df03c6 smb: client: fix double put of @cfile in smb2_rename_path()
+E	7ccc1465465d smb: client: fix hang in wait_for_response() for negproto
+E	91d1dfae4649 cifs: Fix FALLOC_FL_ZERO_RANGE to preflush buffered part of target region
+E	8101d6e112e2 cifs: Fix copy offload to flush destination region
+	1da29f2c39b6 netfs, cifs: Fix handling of short DIO read
+E	6a5dcd487791 cifs: Fix lack of credit renegotiation on read retry
+B	416871f4fb84 cifs: Fix FALLOC_FL_PUNCH_HOLE support
+	017d17017436 smb/client: fix rdma usage in smb2_async_writev()
+	b608e2c31878 smb/client: remove unused rq_iter_size from struct smb_rqst
+B	c724b2ab6a46 smb/client: avoid dereferencing rdata=NULL in smb2_new_read_req()
+E	5e51224d2afb smb/client: fix typo: GlobalMid_Sem -> GlobalMid_Lock
+B	ec686804117a smb: client: ignore unhandled reparse tags
+E	15179cf2806f smb3: fix problem unloading module due to leaked refcount on shutdown
+	e4be320eeca8 smb3: fix broken cached reads when posix locks
+	5b4f3af39b65 smb: smb2pdu.h: Use static_assert() to check struct sizes
+	836bb3268db4 smb3: fix lock breakage for cached writes
+E	74c2ab6d653b smb/client: avoid possible NULL dereference in cifs_free_subrequest()
+	e3786b29c54c 9p: Fix DIO read through netfs
+	1da91ea87aef introduce fd_file(), convert all accessors to it.
+                         **** 6.11 kernel ****
+B	36bb22a08a69 cifs: cifs_inval_name_dfs_link_error: correct the check for fullpath
+	bdcffe4be7cb Fix spelling errors in Server Message Block
+B	1b5487aefb1c smb3: fix setting SecurityFlags when encryption is required
+	a91bfa67601c cifs: update internal version number
+B	ddecea00f87f smb: client: fix FSCTL_GET_REPARSE_POINT against NetApp
+E	69ca1f57555f smb3: add dynamic tracepoints for shutdown ioctl
+	cd936507986e cifs: Remove cifs_aio_ctx
+B	4b96024ef229 smb: client: handle lack of FSCTL_GET_REPARSE_POINT support
+E	b6f6a7aa689f smb3: add dynamic trace point for session setup key expired failures
+E	6629f87b97e0 smb3: add four dynamic tracepoints for copy_file_range and reflink
+E	5779d398dbcd smb3: add dynamic tracepoint for reflink errors
+B	0e314e452687 cifs: mount with "unix" mount option for SMB1 incorrectly handled
+B	a214384ce26b cifs: fix reconnect with SMB1 UNIX Extensions
+B	193cc89ea0ca cifs: fix potential null pointer use in destroy_workqueue in init_cifs error path
+	a07d38afd152 cifs: Fix missing fscache invalidation
+E	519be989717c cifs: Add a tracepoint to track credits involved in R/W requests
+	61ea6b3a3104 cifs: Fix setting of zero_point after DIO write
+	d2c5eb57b6da cifs: Fix missing error code set
+	de40579b9038 cifs: Fix server re-repick on subrequest retry
+B	ae4ccca47195 cifs: fix noisy message on copy_file_range
+B	d2346e283631 cifs: fix setting SecurityFlags to true
+B	25a6e135569b ksmbd: return FILE_DEVICE_DISK instead of super magic
+	08f70c0a930c cifs: Fix read-performance regression by dropping readahead expansion
+	3229e3a5a374 smb: client: Convert to new uid/gid option parsing helpers
+	                      **** 6.10 kernel ****
+	3f59138580bf cifs: Move the 'pid' from the subreq to the req
+E	969b3010cbfc cifs: Only pick a channel once per read request
+	ce5291e56081 cifs: Defer read completion
+B	8bf0287528da cifs: fix typo in module parameter enable_gcm_256
+	29433a17a79c cifs: drop the incorrect assertion in cifs_swap_rw()
+	a88d60903696 cifs: Don't advance the I/O iterator before terminating subrequest
+B	02c418774f76 smb: client: fix deadlock in smb2_find_smb_tcon()
+	518549c120e6 cifs: fix creating sockets when using sfu mount options
+	f89ea63f1c65 netfs, 9p: Fix race between umount and async request completion
+	9ee267a29309 fs: smb: common: add missing MODULE_DESCRIPTION() macros
+E	93a43155127f cifs: Fix missing set of remote_i_size
+	8a1607233566 cifs: Fix smb3_insert_range() to move the zero_point
+	2c92ca849fcc tracing/treewide: Remove second parameter of __assign_str()
+	10c623a1956e cifs: update internal version number
+	16e00683dc74 smb3: reenable swapfiles over SMB3 mounts
+	a395726cf823 cifs: fix data corruption in read after invalidate
+	edfc6481faf8 smb3: fix perf regression with cached writes with netfs conversion
+	14b1cd25346b cifs: Fix locking in cifs_strict_readv()
+	29b4c7bb8565 cifs: Change from mempool_destroy to mempool_exit for request pools
+	9f9bef9bc5c6 smb: smb2pdu.h: Avoid -Wflex-array-member-not-at-end warnings
+	7c1ac89480e8 cifs: Enable large folio support
+	b593634424d4 cifs: Remove some code that's no longer used, part 3
+	2f99c0bce6d3 cifs: Remove some code that's no longer used, part 2
+	742b3443e231 cifs: Remove some code that's no longer used, part 1
+	3ee1a1fc3981 cifs: Cut over to using netfslib
+	69c3c023af25 cifs: Implement netfslib hooks
+	c20c0d7325ab cifs: Make add_credits_and_wake_if() clear deducted credits
+	edea94a69730 cifs: Add mempools for cifs_io_request and cifs_io_subrequest structs
+	3758c485f6c9 cifs: Set zero_point in the copy_file_range() and remap_file_range()
+	1a5b4edd97ce cifs: Move cifs_loose_read_iter() and cifs_file_write_iter() to file.c
+	dc5939de82f1 cifs: Replace the writedata replay bool with a netfs sreq flag
+	56257334e8e0 cifs: Make wait_mtu_credits take size_t args
+	ab58fbdeebc7 cifs: Use more fields from netfs_io_subrequest
+	a975a2f22cdc cifs: Replace cifs_writedata with a wrapper around netfs_io_subrequest
+	753b67eb630d cifs: Replace cifs_readdata with a wrapper around netfs_io_subrequest
+	0f7c0f3f5150 cifs: Use alternative invalidation to using launder_folio
+	2e9d7e4b984a mm: Remove the PG_fscache alias for PG_private_2
+	                   **** 6.9 kernel ****	
+	                   
+	                   **** Other ****
+B	16380f52b7216 mm: page_ref: remove folio_try_get_rcu()
