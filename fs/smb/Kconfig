@@ -9,3 +9,5 @@ config SMBFS
 	tristate
 	default y if CIFS=y || SMB_SERVER=y
 	default m if CIFS=m || SMB_SERVER=m
+
+source "fs/smb/common/smbdirect/Kconfig"
