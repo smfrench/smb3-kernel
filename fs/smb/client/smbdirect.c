@@ -4,6 +4,9 @@
  *
  *   Author(s): Long Li <longli@microsoft.com>
  */
+
+#define SMBDIRECT_USE_INLINE_C_FILES 1
+
 #include <linux/module.h>
 #include <linux/highmem.h>
 #include <linux/folio_queue.h>
@@ -141,6 +144,14 @@ static unsigned int smbd_logging_level = ERR;
 module_param(smbd_logging_level, uint, 0644);
 MODULE_PARM_DESC(smbd_logging_level,
 	"Logging level for SMBD transport, 0 (default): error, 1: info");
+
+/*
+ * This is a temporary solution until all code
+ * is moved to smbdirect_all_c_files.c and we
+ * have an smbdirect.ko that exports the required
+ * functions.
+ */
+#include "../common/smbdirect/smbdirect_all_c_files.c"
 
 #define log_rdma(level, class, fmt, args...)				\
 do {									\
