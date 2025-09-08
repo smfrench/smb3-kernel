@@ -1441,6 +1441,7 @@ struct cifs_search_info {
 	bool emptyDir:1;
 	bool unicode:1;
 	bool smallBuf:1; /* so we know which buf_release function to call */
+	bool restart_scan;
 };
 
 #define ACL_NO_MODE	((umode_t)(-1))

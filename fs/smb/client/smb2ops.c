@@ -2397,7 +2397,7 @@ replay_again:
 	rc = SMB2_query_directory_init(xid, tcon, server,
 				       &rqst[1],
 				       COMPOUND_FID, COMPOUND_FID,
-				       0, srch_inf->info_level);
+				       0, srch_inf);
 	if (rc)
 		goto qdf_free;
 

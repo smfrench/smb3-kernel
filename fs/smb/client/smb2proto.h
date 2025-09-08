@@ -231,7 +231,7 @@ extern int SMB2_query_directory_init(unsigned int xid, struct cifs_tcon *tcon,
 				     struct TCP_Server_Info *server,
 				     struct smb_rqst *rqst,
 				     u64 persistent_fid, u64 volatile_fid,
-				     int index, int info_level);
+				     int index, struct cifs_search_info *search);
 extern void SMB2_query_directory_free(struct smb_rqst *rqst);
 extern int SMB2_set_eof(const unsigned int xid, struct cifs_tcon *tcon,
 			u64 persistent_fid, u64 volatile_fid, u32 pid,
