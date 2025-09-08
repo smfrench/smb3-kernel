@@ -1110,6 +1110,11 @@ out:
 	return (ssize_t)rc;
 }
 
+static int smb2_query_info_compound(const unsigned int xid, struct cifs_tcon *tcon,
+				    const char *path, u32 desired_access, u32 class, u32 type,
+				    u32 output_len, struct kvec *rsp, int *buftype,
+				    struct cifs_sb_info *cifs_sb, bool is_dir);
+
 static ssize_t
 smb2_query_eas(const unsigned int xid, struct cifs_tcon *tcon,
 	       const unsigned char *path, const unsigned char *ea_name,
@@ -1129,7 +1134,7 @@ smb2_query_eas(const unsigned int xid, struct cifs_tcon *tcon,
 				      CIFSMaxBufSize -
 				      MAX_SMB2_CREATE_RESPONSE_SIZE -
 				      MAX_SMB2_CLOSE_RESPONSE_SIZE,
-				      &rsp_iov, &buftype, cifs_sb);
+				      &rsp_iov, &buftype, cifs_sb, false);
 	if (rc) {
 		/*
 		 * If ea_name is NULL (listxattr) and there are no EAs,
@@ -1231,7 +1236,7 @@ replay_again:
 				      CIFSMaxBufSize -
 				      MAX_SMB2_CREATE_RESPONSE_SIZE -
 				      MAX_SMB2_CLOSE_RESPONSE_SIZE,
-				      &rsp_iov[1], &resp_buftype[1], cifs_sb);
+				      &rsp_iov[1], &resp_buftype[1], cifs_sb, false);
 			if (rc == 0) {
 				rsp = (struct smb2_query_info_rsp *)rsp_iov[1].iov_base;
 				used_len = le32_to_cpu(rsp->OutputBufferLength);
@@ -2694,12 +2699,10 @@ bool smb2_should_replay(struct cifs_tcon *tcon,
  * Passes the query info response back to the caller on success.
  * Caller need to free this with free_rsp_buf().
  */
-int
-smb2_query_info_compound(const unsigned int xid, struct cifs_tcon *tcon,
-			 const char *path, u32 desired_access,
-			 u32 class, u32 type, u32 output_len,
-			 struct kvec *rsp, int *buftype,
-			 struct cifs_sb_info *cifs_sb)
+static int smb2_query_info_compound(const unsigned int xid, struct cifs_tcon *tcon,
+				    const char *path, u32 desired_access, u32 class, u32 type,
+				    u32 output_len, struct kvec *rsp, int *buftype,
+				    struct cifs_sb_info *cifs_sb, bool is_dir)
 {
 	struct smb2_compound_vars *vars;
 	struct cifs_ses *ses = tcon->ses;
@@ -2741,9 +2744,9 @@ replay_again:
 	rsp_iov = vars->rsp_iov;
 
 	/*
-	 * We can only call this for things we know are directories.
+	 * We can only open + cache paths we know are directories.
 	 */
-	if (!strcmp(path, ""))
+	if (is_dir)
 		/* cfid null if open dir failed */
 		open_cached_dir(xid, tcon, path, cifs_sb, &cfid);
 
@@ -2852,7 +2855,7 @@ out_free_path:
 
 static int
 smb2_queryfs(const unsigned int xid, struct cifs_tcon *tcon,
-	     const char *path, struct cifs_sb_info *cifs_sb, struct kstatfs *buf)
+	     const char *path, struct cifs_sb_info *cifs_sb, struct kstatfs *buf, bool is_dir)
 {
 	struct smb2_query_info_rsp *rsp;
 	struct smb2_fs_full_size_info *info = NULL;
@@ -2860,13 +2863,12 @@ smb2_queryfs(const unsigned int xid, struct cifs_tcon *tcon,
 	int buftype = CIFS_NO_BUFFER;
 	int rc;
 
-
 	rc = smb2_query_info_compound(xid, tcon, path,
 				      FILE_READ_ATTRIBUTES,
 				      FS_FULL_SIZE_INFORMATION,
 				      SMB2_O_INFO_FILESYSTEM,
 				      sizeof(struct smb2_fs_full_size_info),
-				      &rsp_iov, &buftype, cifs_sb);
+				      &rsp_iov, &buftype, cifs_sb, is_dir);
 	if (rc)
 		goto qfs_exit;
 
@@ -2889,7 +2891,7 @@ qfs_exit:
 
 static int
 smb311_queryfs(const unsigned int xid, struct cifs_tcon *tcon,
-	       const char *path, struct cifs_sb_info *cifs_sb, struct kstatfs *buf)
+	       const char *path, struct cifs_sb_info *cifs_sb, struct kstatfs *buf, bool is_dir)
 {
 	int rc;
 	__le16 *utf16_path = NULL;
@@ -2898,7 +2900,7 @@ smb311_queryfs(const unsigned int xid, struct cifs_tcon *tcon,
 	struct cifs_fid fid;
 
 	if (!tcon->posix_extensions)
-		return smb2_queryfs(xid, tcon, path, cifs_sb, buf);
+		return smb2_queryfs(xid, tcon, path, cifs_sb, buf, is_dir);
 
 	oparms = (struct cifs_open_parms) {
 		.tcon = tcon,
