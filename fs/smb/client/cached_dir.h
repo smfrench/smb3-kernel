@@ -8,13 +8,15 @@
 #ifndef _CACHED_DIR_H
 #define _CACHED_DIR_H
 
-
 struct cached_dirent {
 	struct list_head entry;
 	char *name;
 	int namelen;
 	loff_t pos;
-	struct cifs_fattr fattr;
+
+	/* filled from cifs_fattr */
+	u64 unique_id;
+	unsigned int dtype;
 };
 
 struct cached_dirents {
