@@ -1120,6 +1120,8 @@ smb2_mkdir(const unsigned int xid, struct inode *parent_inode, umode_t mode,
 {
 	struct cifs_open_parms oparms;
 
+	invalidate_cached_dirents(tcon->cfids, name, CFID_LOOKUP_PARENT);
+
 	oparms = CIFS_OPARMS(cifs_sb, tcon, name, FILE_WRITE_ATTRIBUTES,
 			     FILE_CREATE, CREATE_NOT_FILE, mode);
 	return smb2_compound_op(xid, tcon, cifs_sb,
@@ -1140,6 +1142,8 @@ smb2_mkdir_setinfo(struct inode *inode, const char *name,
 	struct kvec in_iov;
 	u32 dosattrs;
 	int tmprc;
+
+	invalidate_cached_dirents(tcon->cfids, name, CFID_LOOKUP_PARENT);
 
 	in_iov.iov_base = &data;
 	in_iov.iov_len = sizeof(data);
@@ -1195,6 +1199,13 @@ smb2_unlink(const unsigned int xid, struct cifs_tcon *tcon, const char *name,
 	utf16_path = cifs_convert_path_to_utf16(name, cifs_sb);
 	if (!utf16_path)
 		return -ENOMEM;
+
+	if (dentry) {
+		inode = d_inode(dentry);
+		invalidate_cached_dirents(tcon->cfids, dentry->d_parent, CFID_LOOKUP_DENTRY);
+	} else {
+		invalidate_cached_dirents(tcon->cfids, name, CFID_LOOKUP_PARENT);
+	}
 
 	if (smb3_encryption_required(tcon))
 		flags |= CIFS_TRANSFORM_REQ;

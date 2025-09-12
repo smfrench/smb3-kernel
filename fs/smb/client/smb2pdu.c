@@ -2419,7 +2419,8 @@ add_lease_context(struct TCP_Server_Info *server,
 	if (iov[num].iov_base == NULL)
 		return -ENOMEM;
 	iov[num].iov_len = server->vals->create_lease_size;
-	req->RequestedOplockLevel = SMB2_OPLOCK_LEVEL_LEASE;
+	/* keep the requested oplock level in case of just setting ParentLeaseKey */
+	req->RequestedOplockLevel = *oplock;
 	*num_iovec = num + 1;
 	return 0;
 }
@@ -3001,6 +3002,34 @@ err_free_path:
 	return rc;
 }
 
+/*
+ * When opening a path, set ParentLeaseKey in @oparms if its parent is cached.
+ * We only have RH caching for dirs, so skip this on mkdir, unlink, rmdir.
+ *
+ * Ref: MS-SMB2 3.3.5.9 and MS-FSA 2.1.5.1
+ *
+ * Return: 0 if ParentLeaseKey was set in @oparms, -errno otherwise.
+ */
+static int check_cached_parent(struct cached_fids *cfids, struct cifs_open_parms *oparms)
+{
+	struct cached_fid *cfid;
+
+	if (!cfids || !oparms || !oparms->cifs_sb || !*oparms->path)
+		return -EINVAL;
+
+	cfid = find_cached_dir(cfids, oparms->path, CFID_LOOKUP_PARENT);
+	if (!cfid)
+		return -ENOENT;
+
+	cifs_dbg(FYI, "%s: found cached parent for path: %s\n", __func__, oparms->path);
+
+	memcpy(oparms->fid->parent_lease_key, cfid->fid.lease_key, SMB2_LEASE_KEY_SIZE);
+	oparms->lease_flags |= SMB2_LEASE_FLAG_PARENT_LEASE_KEY_SET_LE;
+	close_cached_dir(cfid);
+
+	return 0;
+}
+
 int
 SMB2_open_init(struct cifs_tcon *tcon, struct TCP_Server_Info *server,
 	       struct smb_rqst *rqst, __u8 *oplock,
@@ -3077,20 +3106,28 @@ SMB2_open_init(struct cifs_tcon *tcon, struct TCP_Server_Info *server,
 	iov[1].iov_len = uni_path_len;
 	iov[1].iov_base = path;
 
-	if ((!server->oplocks) || (tcon->no_lease))
+	if (!server->oplocks || tcon->no_lease)
 		*oplock = SMB2_OPLOCK_LEVEL_NONE;
 
-	if (!(server->capabilities & SMB2_GLOBAL_CAP_LEASING) ||
-	    *oplock == SMB2_OPLOCK_LEVEL_NONE)
-		req->RequestedOplockLevel = *oplock;
-	else if (!(server->capabilities & SMB2_GLOBAL_CAP_DIRECTORY_LEASING) &&
-		  (oparms->create_options & CREATE_NOT_FILE))
-		req->RequestedOplockLevel = *oplock; /* no srv lease support */
-	else {
-		rc = add_lease_context(server, req, iov, &n_iov,
-				       oparms->fid->lease_key, oplock,
-				       oparms->fid->parent_lease_key,
-				       oparms->lease_flags);
+	req->RequestedOplockLevel = *oplock;
+
+	/*
+	 * MS-SMB2 "Product Behavior" says Windows only checks/sets ParentLeaseKey when a lease is
+	 * requested for the child/target.
+	 * Practically speaking, adding the lease context with ParentLeaseKey set, even with oplock
+	 * none, works fine.
+	 * As a precaution, however, only set it for oplocks != none.
+	 */
+	if ((server->capabilities & SMB2_GLOBAL_CAP_LEASING) &&
+	    *oplock != SMB2_OPLOCK_LEVEL_NONE) {
+		rc = -EOPNOTSUPP;
+		if (server->capabilities & SMB2_GLOBAL_CAP_DIRECTORY_LEASING)
+			rc = check_cached_parent(tcon->cfids, oparms);
+
+		if (!rc || *oplock != SMB2_OPLOCK_LEVEL_NONE)
+			rc = add_lease_context(server, req, iov, &n_iov, oparms->fid->lease_key,
+					       oplock, oparms->fid->parent_lease_key,
+					       oparms->lease_flags);
 		if (rc)
 			return rc;
 	}

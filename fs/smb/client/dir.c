@@ -190,9 +190,7 @@ static int cifs_do_create(struct inode *inode, struct dentry *direntry, unsigned
 	int disposition;
 	struct TCP_Server_Info *server = tcon->ses->server;
 	struct cifs_open_parms oparms;
-	struct cached_fid *parent_cfid = NULL;
 	int rdwr_for_fscache = 0;
-	__le32 lease_flags = 0;
 
 	*oplock = 0;
 	if (tcon->ses->server->oplocks)
@@ -314,27 +312,8 @@ static int cifs_do_create(struct inode *inode, struct dentry *direntry, unsigned
 	if (!tcon->unix_ext && (mode & S_IWUGO) == 0)
 		create_options |= CREATE_OPTION_READONLY;
 
-
 retry_open:
-	if (tcon->cfids && direntry->d_parent && server->dialect >= SMB30_PROT_ID) {
-		parent_cfid = NULL;
-		spin_lock(&tcon->cfids->cfid_list_lock);
-		list_for_each_entry(parent_cfid, &tcon->cfids->entries, entry) {
-			if (parent_cfid->dentry == direntry->d_parent) {
-				if (!is_valid_cached_dir(parent_cfid))
-					break;
-
-				cifs_dbg(FYI, "found a parent cached file handle\n");
-
-				lease_flags |= SMB2_LEASE_FLAG_PARENT_LEASE_KEY_SET_LE;
-				memcpy(fid->parent_lease_key, parent_cfid->fid.lease_key,
-				       SMB2_LEASE_KEY_SIZE);
-				parent_cfid->dirents.is_valid = false;
-				break;
-			}
-		}
-		spin_unlock(&tcon->cfids->cfid_list_lock);
-	}
+	invalidate_cached_dirents(tcon->cfids, direntry->d_parent, CFID_LOOKUP_DENTRY);
 
 	oparms = (struct cifs_open_parms) {
 		.tcon = tcon,
@@ -344,7 +323,6 @@ retry_open:
 		.disposition = disposition,
 		.path = full_path,
 		.fid = fid,
-		.lease_flags = lease_flags,
 		.mode = mode,
 	};
 	rc = server->ops->open(xid, &oparms, oplock, buf);

@@ -59,11 +59,15 @@ struct cached_fids {
 	/* aggregate accounting for all cached dirents under this tcon */
 	atomic_long_t total_dirents_entries;
 	atomic64_t total_dirents_bytes;
+
+	/* convenience for parent lookups */
+	int dirsep;
 };
 
 /* Lookup modes for find_cached_dir() */
 enum {
 	CFID_LOOKUP_PATH,
+	CFID_LOOKUP_PARENT,
 	CFID_LOOKUP_DENTRY,
 	CFID_LOOKUP_LEASEKEY,
 };
@@ -86,6 +90,7 @@ extern int open_cached_dir(unsigned int xid, struct cifs_tcon *tcon, const char 
 			   struct cifs_sb_info *cifs_sb, struct cached_fid **cfid);
 extern void close_cached_dir(struct cached_fid *cfid);
 extern bool drop_cached_dir(struct cached_fids *cfids, const void *key, int mode);
+extern void invalidate_cached_dirents(struct cached_fids *cfids, const void *key, int mode);
 extern void close_all_cached_dirs(struct cifs_sb_info *cifs_sb);
 extern void invalidate_all_cached_dirs(struct cached_fids *cfids);
 #endif			/* _CACHED_DIR_H */

@@ -69,11 +69,29 @@ static struct cached_fid *find_cfid(struct cached_fids *cfids, const void *key, 
 				    bool wait_open)
 {
 	struct cached_fid *cfid, *found;
+	const char *parent_path = NULL;
 	bool match;
 
 	if (!cfids || !key)
 		return NULL;
 
+	if (mode == CFID_LOOKUP_PARENT) {
+		const char *path = key;
+
+		if (!*path)
+			return NULL;
+
+		parent_path = strrchr(path, cfids->dirsep);
+		if (!parent_path)
+			return NULL;
+
+		parent_path = kstrndup(path, parent_path - path, GFP_KERNEL);
+		if (WARN_ON_ONCE(!parent_path))
+			return NULL;
+
+		key = parent_path;
+		mode = CFID_LOOKUP_PATH;
+	}
 retry_find:
 	found = NULL;
 
@@ -111,6 +129,8 @@ retry_find:
 		/* we didn't get a ref above, so get one now */
 		kref_get(&found->refcount);
 	}
+
+	kfree(parent_path);
 
 	return found;
 }
@@ -224,7 +244,6 @@ int open_cached_dir(unsigned int xid, struct cifs_tcon *tcon, const char *path,
 	struct cached_fids *cfids;
 	const char *npath;
 	int retries = 0, cur_sleep = 1;
-	__le32 lease_flags = 0;
 
 	if (cifs_sb->root == NULL)
 		return -ENOENT;
@@ -234,9 +253,11 @@ int open_cached_dir(unsigned int xid, struct cifs_tcon *tcon, const char *path,
 
 	ses = tcon->ses;
 	cfids = tcon->cfids;
-
 	if (!cfids)
 		return -EOPNOTSUPP;
+
+	if (!cfids->dirsep)
+		cfids->dirsep = CIFS_DIR_SEP(cifs_sb);
 replay_again:
 	/* reinitialize for possible replay */
 	flags = 0;
@@ -304,25 +325,6 @@ replay_again:
 			rc = -ENOENT;
 			goto out;
 		}
-		if (dentry->d_parent && server->dialect >= SMB30_PROT_ID) {
-			struct cached_fid *parent_cfid;
-
-			spin_lock(&cfids->cfid_list_lock);
-			list_for_each_entry(parent_cfid, &cfids->entries, entry) {
-				if (parent_cfid->dentry == dentry->d_parent) {
-					if (!is_valid_cached_dir(parent_cfid))
-						break;
-
-					cifs_dbg(FYI, "found a parent cached file handle\n");
-
-					lease_flags |= SMB2_LEASE_FLAG_PARENT_LEASE_KEY_SET_LE;
-					memcpy(pfid->parent_lease_key, parent_cfid->fid.lease_key,
-					       SMB2_LEASE_KEY_SIZE);
-					break;
-				}
-			}
-			spin_unlock(&cfids->cfid_list_lock);
-		}
 	}
 	cfid->dentry = dentry;
 	cfid->tcon = tcon;
@@ -349,20 +351,13 @@ replay_again:
 	rqst[0].rq_iov = open_iov;
 	rqst[0].rq_nvec = SMB2_CREATE_IOV_SIZE;
 
-	oparms = (struct cifs_open_parms) {
-		.tcon = tcon,
-		.path = path,
-		.create_options = cifs_create_options(cifs_sb, CREATE_NOT_FILE),
-		.desired_access =  FILE_READ_DATA | FILE_READ_ATTRIBUTES |
-				   FILE_READ_EA,
-		.disposition = FILE_OPEN,
-		.fid = pfid,
-		.lease_flags = lease_flags,
-		.replay = !!(retries),
-	};
+	oparms = CIFS_OPARMS(cifs_sb, tcon, path,
+			     FILE_READ_DATA | FILE_READ_ATTRIBUTES | FILE_READ_EA, FILE_OPEN,
+			     cifs_create_options(cifs_sb, CREATE_NOT_FILE), 0);
+	oparms.fid = pfid;
+	oparms.replay = !!retries;
 
-	rc = SMB2_open_init(tcon, server,
-			    &rqst[0], &oplock, &oparms, utf16_path);
+	rc = SMB2_open_init(tcon, server, &rqst[0], &oplock, &oparms, utf16_path);
 	if (rc)
 		goto oshr_free;
 	smb2_set_next_command(tcon, &rqst[0]);
@@ -477,20 +472,34 @@ out:
 	return rc;
 }
 
-static void
-smb2_close_cached_fid(struct kref *ref)
+static void __invalidate_cached_dirents(struct cached_fid *cfid)
 {
-	struct cached_fid *cfid = container_of(ref, struct cached_fid, refcount);
 	struct cached_dirent *de, *q;
 
-	drop_cfid(cfid);
+	if (!cfid)
+		return;
 
-	/* Delete all cached dirent names */
+	mutex_lock(&cfid->dirents.de_mutex);
 	list_for_each_entry_safe(de, q, &cfid->dirents.entries, entry) {
 		list_del(&de->entry);
 		kfree(de->name);
 		kfree(de);
 	}
+
+	cfid->dirents.is_valid = false;
+	cfid->dirents.is_failed = false;
+	cfid->dirents.file = NULL;
+	cfid->dirents.pos = 0;
+	mutex_unlock(&cfid->dirents.de_mutex);
+}
+
+static void
+smb2_close_cached_fid(struct kref *ref)
+{
+	struct cached_fid *cfid = container_of(ref, struct cached_fid, refcount);
+
+	__invalidate_cached_dirents(cfid);
+	drop_cfid(cfid);
 
 	kfree(cfid->file_all_info);
 	cfid->file_all_info = NULL;
@@ -529,6 +538,26 @@ bool drop_cached_dir(struct cached_fids *cfids, const void *key, int mode)
 	mod_delayed_work(cfid_put_wq, &cfids->laundromat_work, 0);
 
 	return true;
+}
+
+/*
+ * Invalidate cached dirents from @key's parent, regardless if @key itself is a cached dir.
+ *
+ * Lease breaks don't necessarily require this, and would require finding the child to begin with,
+ * so skip such cases.
+ */
+void invalidate_cached_dirents(struct cached_fids *cfids, const void *key, int mode)
+{
+	struct cached_fid *cfid = NULL;
+
+	if (mode == CFID_LOOKUP_LEASEKEY)
+		return;
+
+	cfid = find_cfid(cfids, key, mode, false);
+	if (cfid) {
+		__invalidate_cached_dirents(cfid);
+		kref_put(&cfid->refcount, smb2_close_cached_fid);
+	}
 }
 
 void close_cached_dir(struct cached_fid *cfid)
