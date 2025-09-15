@@ -599,34 +599,11 @@ void invalidate_all_cached_dirs(struct cifs_tcon *tcon)
 	flush_delayed_work(&cfids->laundromat_work);
 }
 
-/*
- * Release the cached directory's dentry and schedule immediate cleanup on laundromat.
- * Must be called with a reference to the cached_fid and a reference to the tcon.
- */
-static void cached_dir_put_work(struct work_struct *work)
-{
-	struct cached_fid *cfid = container_of(work, struct cached_fid, put_work);
-	struct cached_fids *cfids = cfid->cfids;
-	struct cifs_tcon *tcon = cfid->tcon;
-
-	dput(cfid->dentry);
-	cfid->dentry = NULL;
-
-	/* move to dying list so laundromat can clean it up */
-	spin_lock(&cfids->cfid_list_lock);
-	list_move(&cfid->entry, &cfids->dying);
-	cfid->on_list = false;
-	cfids->num_entries--;
-	spin_unlock(&cfids->cfid_list_lock);
-
-	cifs_put_tcon(tcon, netfs_trace_tcon_ref_put_cached_close);
-	mod_delayed_work(cfid_put_wq, &cfids->laundromat_work, 0);
-}
-
 bool cached_dir_lease_break(struct cifs_tcon *tcon, __u8 lease_key[16])
 {
 	struct cached_fids *cfids = tcon->cfids;
 	struct cached_fid *cfid;
+	bool found = false;
 
 	if (cfids == NULL)
 		return false;
@@ -640,16 +617,25 @@ bool cached_dir_lease_break(struct cifs_tcon *tcon, __u8 lease_key[16])
 			cfid->has_lease = false;
 			cfid->time = 0;
 
-			++tcon->tc_count;
-			trace_smb3_tcon_ref(tcon->debug_id, tcon->tc_count,
-					    netfs_trace_tcon_ref_get_cached_lease_break);
-			queue_work(cfid_put_wq, &cfid->put_work);
-			spin_unlock(&cfids->cfid_list_lock);
-			return true;
+			/*
+			 * We found a lease, move it to the dying list and schedule immediate
+			 * cleanup on laundromat.
+			 * No need to take a ref here, as we still hold our initial one.
+			 */
+			list_move(&cfid->entry, &cfids->dying);
+			cfids->num_entries--;
+			cfid->on_list = false;
+			found = true;
+			break;
 		}
 	}
 	spin_unlock(&cfids->cfid_list_lock);
-	return false;
+
+	/* avoid unnecessary scheduling */
+	if (found)
+		mod_delayed_work(cfid_put_wq, &cfids->laundromat_work, 0);
+
+	return found;
 }
 
 static struct cached_fid *init_cached_dir(const char *path)
@@ -665,7 +651,6 @@ static struct cached_fid *init_cached_dir(const char *path)
 		return NULL;
 	}
 
-	INIT_WORK(&cfid->put_work, cached_dir_put_work);
 	INIT_LIST_HEAD(&cfid->entry);
 	INIT_LIST_HEAD(&cfid->dirents.entries);
 	mutex_init(&cfid->dirents.de_mutex);
@@ -676,8 +661,6 @@ static struct cached_fid *init_cached_dir(const char *path)
 static void free_cached_dir(struct cached_fid *cfid)
 {
 	struct cached_dirent *dirent, *q;
-
-	WARN_ON(work_pending(&cfid->put_work));
 
 	/*
 	 * Delete all cached dirent names
