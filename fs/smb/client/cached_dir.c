@@ -52,10 +52,7 @@ static inline void drop_cfid(struct cached_fid *cfid)
 	}
 }
 
-static struct cached_fid *find_or_create_cached_dir(struct cached_fids *cfids,
-						    const char *path,
-						    bool lookup_only,
-						    __u32 max_cached_dirs)
+static struct cached_fid *find_cached_dir(struct cached_fids *cfids, const char *path)
 {
 	struct cached_fid *cfid;
 
@@ -69,35 +66,13 @@ static struct cached_fid *find_or_create_cached_dir(struct cached_fids *cfids,
 			if (!is_valid_cached_dir(cfid))
 				return NULL;
 
+			cfid->last_access_time = jiffies;
 			kref_get(&cfid->refcount);
 			return cfid;
 		}
 	}
-	if (lookup_only) {
-		return NULL;
-	}
-	if (cfids->num_entries >= max_cached_dirs) {
-		return NULL;
-	}
-	cfid = init_cached_dir(path);
-	if (cfid == NULL) {
-		return NULL;
-	}
-	cfid->cfids = cfids;
-	cfids->num_entries++;
-	list_add(&cfid->entry, &cfids->entries);
-	kref_get(&cfid->refcount);
-	/*
-	 * Set @cfid->has_lease to true during construction so that the lease
-	 * reference can be put in cached_dir_lease_break() due to a potential
-	 * lease break right after the request is sent or while @cfid is still
-	 * being cached, or if a reconnection is triggered during construction.
-	 * Concurrent processes won't be to use it yet due to @cfid->time being
-	 * zero.
-	 */
-	cfid->has_lease = true;
 
-	return cfid;
+	return NULL;
 }
 
 static struct dentry *
@@ -195,9 +170,8 @@ int open_cached_dir(unsigned int xid, struct cifs_tcon *tcon,
 	ses = tcon->ses;
 	cfids = tcon->cfids;
 
-	if (cfids == NULL)
+	if (!cfids)
 		return -EOPNOTSUPP;
-
 replay_again:
 	/* reinitialize for possible replay */
 	flags = 0;
@@ -212,24 +186,31 @@ replay_again:
 		return -ENOMEM;
 
 	spin_lock(&cfids->cfid_list_lock);
-	cfid = find_or_create_cached_dir(cfids, path, lookup_only, tcon->max_cached_dirs);
-	if (cfid == NULL) {
+	if (cfids->num_entries >= tcon->max_cached_dirs) {
 		spin_unlock(&cfids->cfid_list_lock);
 		kfree(utf16_path);
 		return -ENOENT;
 	}
-	/*
-	 * Return cached fid if it is valid (has a lease and has a time).
-	 * Otherwise, it is either a new entry or laundromat worker removed it
-	 * from @cfids->entries.  Caller will put last reference if the latter.
-	 */
-	if (is_valid_cached_dir(cfid)) {
-		cfid->last_access_time = jiffies;
-		spin_unlock(&cfids->cfid_list_lock);
+
+	/* find_cached_dir() already checks if cfid is valid, so no need to check here */
+	cfid = find_cached_dir(cfids, path);
+	if (cfid || lookup_only) {
 		*ret_cfid = cfid;
+		spin_unlock(&cfids->cfid_list_lock);
 		kfree(utf16_path);
-		return 0;
+		return cfid ? 0 : -ENOENT;
 	}
+
+	cfid = init_cached_dir(path);
+	if (!cfid) {
+		spin_unlock(&cfids->cfid_list_lock);
+		kfree(utf16_path);
+		return -ENOMEM;
+	}
+
+	cfid->cfids = cfids;
+	cfids->num_entries++;
+	list_add(&cfid->entry, &cfids->entries);
 	spin_unlock(&cfids->cfid_list_lock);
 
 	pfid = &cfid->fid;
@@ -490,19 +471,22 @@ smb2_close_cached_fid(struct kref *ref)
 	kfree(cfid);
 }
 
-void drop_cached_dir_by_name(const unsigned int xid, struct cifs_tcon *tcon,
-			     const char *name, struct cifs_sb_info *cifs_sb)
+void drop_cached_dir_by_name(struct cached_fids *cfids, const char *name)
 {
-	struct cached_fid *cfid = NULL;
-	int rc;
+	struct cached_fid *cfid;
 
-	rc = open_cached_dir(xid, tcon, name, cifs_sb, true, &cfid);
-	if (rc) {
+	if (!cfids)
+		return;
+
+	cfid = find_cached_dir(cfids, name);
+	if (!cfid) {
 		cifs_dbg(FYI, "no cached dir found for rmdir(%s)\n", name);
 		return;
 	}
 
 	drop_cfid(cfid);
+
+	/* put lookup ref */
 	kref_put(&cfid->refcount, smb2_close_cached_fid);
 }
 
@@ -612,6 +596,7 @@ static struct cached_fid *init_cached_dir(const char *path)
 	cfid = kzalloc(sizeof(*cfid), GFP_ATOMIC);
 	if (!cfid)
 		return NULL;
+
 	cfid->path = kstrdup(path, GFP_ATOMIC);
 	if (!cfid->path) {
 		kfree(cfid);
@@ -621,7 +606,23 @@ static struct cached_fid *init_cached_dir(const char *path)
 	INIT_LIST_HEAD(&cfid->entry);
 	INIT_LIST_HEAD(&cfid->dirents.entries);
 	mutex_init(&cfid->dirents.de_mutex);
+
+	/* this is our ref */
 	kref_init(&cfid->refcount);
+
+	/* this is caller ref */
+	kref_get(&cfid->refcount);
+
+	/*
+	 * Set @cfid->has_lease to true during construction so that the lease
+	 * reference can be put in cached_dir_lease_break() due to a potential
+	 * lease break right after the request is sent or while @cfid is still
+	 * being cached, or if a reconnection is triggered during construction.
+	 * Concurrent processes won't be to use it yet due to @cfid->time being
+	 * zero.
+	 */
+	cfid->has_lease = true;
+
 	return cfid;
 }
 

@@ -2629,7 +2629,7 @@ unlink_target:
 			 * ->i_nlink and then mark it as delete pending.
 			 */
 			if (S_ISDIR(inode->i_mode)) {
-				drop_cached_dir_by_name(xid, tcon, to_name, cifs_sb);
+				drop_cached_dir_by_name(tcon->cfids, to_name);
 				spin_lock(&inode->i_lock);
 				i_size_write(inode, 0);
 				clear_nlink(inode);
