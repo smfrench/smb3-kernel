@@ -101,6 +101,31 @@ static void smbdirect_connection_wake_up_all(struct smbdirect_socket *sc)
 	wake_up_all(&sc->mr_io.cleanup.wait_queue);
 }
 
+__maybe_unused /* this is temporary while this file is included in orders */
+static void smbdirect_connection_qp_event_handler(struct ib_event *event, void *context)
+{
+	struct smbdirect_socket *sc = context;
+
+	smbdirect_log_rdma_event(sc, SMBDIRECT_LOG_ERR,
+		"%s on device %.*s socket %p (cm_id=%p) status %s first_error %1pe\n",
+		ib_event_msg(event->event),
+		IB_DEVICE_NAME_MAX,
+		event->device->name,
+		sc, sc->rdma.cm_id,
+		smbdirect_socket_status_string(sc->status),
+		SMBDIRECT_DEBUG_ERR_PTR(sc->first_error));
+
+	switch (event->event) {
+	case IB_EVENT_CQ_ERR:
+	case IB_EVENT_QP_FATAL:
+		smbdirect_connection_schedule_disconnect(sc, -ECONNABORTED);
+		break;
+
+	default:
+		break;
+	}
+}
+
 static void smbdirect_connection_destroy_mem_pools(struct smbdirect_socket *sc);
 
 __maybe_unused /* this is temporary while this file is included in orders */
@@ -348,7 +373,6 @@ smbdirect_connection_reassembly_first_recv_io(struct smbdirect_socket *sc)
 	return msg;
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
 static void smbdirect_connection_schedule_disconnect(struct smbdirect_socket *sc,
 						     int error)
 {
