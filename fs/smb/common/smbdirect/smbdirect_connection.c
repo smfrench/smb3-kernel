@@ -889,6 +889,48 @@ static void smbdirect_connection_send_io_done(struct ib_cq *cq, struct ib_wc *wc
 	wake_up(&sc->send_io.pending.dec_wait_queue);
 }
 
+__maybe_unused /* this is temporary while this file is included in orders */
+static int smbdirect_connection_post_recv_io(struct smbdirect_recv_io *msg)
+{
+	struct smbdirect_socket *sc = msg->socket;
+	struct smbdirect_socket_parameters *sp = &sc->parameters;
+	struct ib_recv_wr recv_wr = {
+		.wr_cqe = &msg->cqe,
+		.sg_list = &msg->sge,
+		.num_sge = 1,
+	};
+	int ret;
+
+	if (unlikely(sc->first_error))
+		return sc->first_error;
+
+	msg->sge.addr = ib_dma_map_single(sc->ib.dev,
+					  msg->packet,
+					  sp->max_recv_size,
+					  DMA_FROM_DEVICE);
+	ret = ib_dma_mapping_error(sc->ib.dev, msg->sge.addr);
+	if (ret)
+		return ret;
+
+	msg->sge.length = sp->max_recv_size;
+	msg->sge.lkey = sc->ib.pd->local_dma_lkey;
+
+	ret = ib_post_recv(sc->ib.qp, &recv_wr, NULL);
+	if (ret) {
+		smbdirect_log_rdma_recv(sc, SMBDIRECT_LOG_ERR,
+			"ib_post_recv failed ret=%d (%s)\n",
+			ret, errname(ret));
+		ib_dma_unmap_single(sc->ib.dev,
+				    msg->sge.addr,
+				    msg->sge.length,
+				    DMA_FROM_DEVICE);
+		msg->sge.length = 0;
+		smbdirect_connection_schedule_disconnect(sc, ret);
+	}
+
+	return ret;
+}
+
 static bool smbdirect_map_sges_single_page(struct smbdirect_map_sges *state,
 					   struct page *page, size_t off, size_t len)
 {
