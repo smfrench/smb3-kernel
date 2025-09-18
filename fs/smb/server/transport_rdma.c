@@ -531,41 +531,6 @@ static void recv_done(struct ib_cq *cq, struct ib_wc *wc)
 	smbdirect_connection_schedule_disconnect(sc, -ECONNABORTED);
 }
 
-static int smb_direct_post_recv(struct smbdirect_socket *sc,
-				struct smbdirect_recv_io *recvmsg)
-{
-	struct smbdirect_socket_parameters *sp = &sc->parameters;
-	struct ib_recv_wr wr;
-	int ret;
-
-	recvmsg->sge.addr = ib_dma_map_single(sc->ib.dev,
-					      recvmsg->packet,
-					      sp->max_recv_size,
-					      DMA_FROM_DEVICE);
-	ret = ib_dma_mapping_error(sc->ib.dev, recvmsg->sge.addr);
-	if (ret)
-		return ret;
-	recvmsg->sge.length = sp->max_recv_size;
-	recvmsg->sge.lkey = sc->ib.pd->local_dma_lkey;
-
-	wr.wr_cqe = &recvmsg->cqe;
-	wr.next = NULL;
-	wr.sg_list = &recvmsg->sge;
-	wr.num_sge = 1;
-
-	ret = ib_post_recv(sc->ib.qp, &wr, NULL);
-	if (ret) {
-		pr_err("Can't post recv: %d\n", ret);
-		ib_dma_unmap_single(sc->ib.dev,
-				    recvmsg->sge.addr, recvmsg->sge.length,
-				    DMA_FROM_DEVICE);
-		recvmsg->sge.length = 0;
-		smbdirect_connection_schedule_disconnect(sc, ret);
-		return ret;
-	}
-	return ret;
-}
-
 static int smb_direct_read(struct ksmbd_transport *t, char *buf,
 			   unsigned int size, int unused)
 {
@@ -702,7 +667,7 @@ static void smb_direct_post_recv_credits(struct work_struct *work)
 
 			recvmsg->first_segment = false;
 
-			ret = smb_direct_post_recv(sc, recvmsg);
+			ret = smbdirect_connection_post_recv_io(recvmsg);
 			if (ret) {
 				pr_err("Can't post recv: %d\n", ret);
 				smbdirect_connection_put_recv_io(recvmsg);
@@ -1621,7 +1586,7 @@ static int smb_direct_prepare_negotiation(struct smbdirect_socket *sc)
 	if (!recvmsg)
 		return -ENOMEM;
 
-	ret = smb_direct_post_recv(sc, recvmsg);
+	ret = smbdirect_connection_post_recv_io(recvmsg);
 	if (ret) {
 		pr_err("Can't post recv: %d\n", ret);
 		goto out_err;
