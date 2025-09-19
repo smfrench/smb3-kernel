@@ -543,7 +543,7 @@ static int cifs_query_path_info(const unsigned int xid,
 				struct cifs_tcon *tcon,
 				struct cifs_sb_info *cifs_sb,
 				const char *full_path,
-				struct cifs_open_info_data *data)
+				struct cifs_open_info_data *data, bool is_dir)
 {
 	int rc = -EOPNOTSUPP;
 	FILE_ALL_INFO fi = {};
@@ -934,7 +934,7 @@ smb_set_file_info(struct inode *inode, const char *full_path,
 	if (!(tcon->ses->capabilities & CAP_NT_SMBS) &&
 	    (!buf->CreationTime || !buf->LastAccessTime ||
 	     !buf->LastWriteTime || !buf->ChangeTime)) {
-		rc = cifs_query_path_info(xid, tcon, cifs_sb, full_path, &query_data);
+		rc = cifs_query_path_info(xid, tcon, cifs_sb, full_path, &query_data, false);
 		if (rc) {
 			if (open_file) {
 				cifsFileInfo_put(open_file);

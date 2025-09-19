@@ -940,10 +940,9 @@ int smb2_query_path_info(const unsigned int xid,
 			 struct cifs_tcon *tcon,
 			 struct cifs_sb_info *cifs_sb,
 			 const char *full_path,
-			 struct cifs_open_info_data *data)
+			 struct cifs_open_info_data *data, bool is_dir)
 {
 	struct kvec in_iov[3], out_iov[5] = {};
-	struct cached_fid *cfid = NULL;
 	struct cifs_open_parms oparms;
 	struct cifsFileInfo *cfile;
 	__u32 create_options = 0;
@@ -964,12 +963,17 @@ int smb2_query_path_info(const unsigned int xid,
 	 * is fast enough (always using the compounded version).
 	 */
 	if (!tcon->posix_extensions) {
+		struct cached_fid *cfid = NULL;
+
 		rc = -ENOENT;
 		if (!*full_path)
 			rc = open_cached_dir(xid, tcon, full_path, cifs_sb, &cfid);
+		else if (is_dir)
+			cfid = find_cached_dir(tcon->cfids, full_path, CFID_LOOKUP_PATH);
 
-		/* If it is a root and its handle is cached then use it */
-		if (!rc) {
+		if (cfid) {
+			rc = 0;
+
 			if (cfid->file_all_info) {
 				memcpy(&data->fi, cfid->file_all_info, sizeof(data->fi));
 			} else {

@@ -401,7 +401,7 @@ struct smb_version_operations {
 			       struct cifs_tcon *tcon,
 			       struct cifs_sb_info *cifs_sb,
 			       const char *full_path,
-			       struct cifs_open_info_data *data);
+			       struct cifs_open_info_data *data, bool is_dir);
 	/* query file data from the server */
 	int (*query_file_info)(const unsigned int xid, struct cifs_tcon *tcon,
 			       struct cifsFileInfo *cfile, struct cifs_open_info_data *data);
