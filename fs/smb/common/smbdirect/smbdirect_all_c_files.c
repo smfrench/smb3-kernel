@@ -17,3 +17,4 @@
 #endif
 #include "smbdirect_connection.c"
 #include "smbdirect_mr.c"
+#include "smbdirect_rw.c"
