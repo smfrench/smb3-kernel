@@ -931,16 +931,13 @@ static int smbdirect_connection_post_recv_io(struct smbdirect_recv_io *msg)
 	return ret;
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static void smbdirect_connection_recv_io_refill_work(struct work_struct *work)
+static int smbdirect_connection_recv_io_refill(struct smbdirect_socket *sc)
 {
-	struct smbdirect_socket *sc =
-		container_of(work, struct smbdirect_socket, recv_io.posted.refill_work);
 	int missing;
 	int posted = 0;
 
 	if (unlikely(sc->first_error))
-		return;
+		return sc->first_error;
 
 	/*
 	 * Find out how much smbdirect_recv_io buffers we should post.
@@ -986,7 +983,7 @@ static void smbdirect_connection_recv_io_refill_work(struct work_struct *work)
 				"smbdirect_connection_post_recv_io failed rc=%d (%s)\n",
 				ret, errname(ret));
 			smbdirect_connection_put_recv_io(recv_io);
-			return;
+			return ret;
 		}
 
 		atomic_inc(&sc->recv_io.posted.count);
@@ -995,7 +992,7 @@ static void smbdirect_connection_recv_io_refill_work(struct work_struct *work)
 
 	/* If nothing was posted we're done */
 	if (posted == 0)
-		return;
+		return 0;
 
 	/*
 	 * If we posted at least one smbdirect_recv_io buffer,
@@ -1016,11 +1013,28 @@ static void smbdirect_connection_recv_io_refill_work(struct work_struct *work)
 	 * grant the credit anyway.
 	 */
 	if (missing == 1 && sc->recv_io.credits.target != 1)
-		return;
+		return 0;
 
-	smbdirect_log_keep_alive(sc, SMBDIRECT_LOG_INFO,
-		"schedule send of an empty message\n");
-	queue_work(sc->workqueue, &sc->idle.immediate_work);
+	return posted;
+}
+
+__maybe_unused /* this is temporary while this file is included in orders */
+static void smbdirect_connection_recv_io_refill_work(struct work_struct *work)
+{
+	struct smbdirect_socket *sc =
+		container_of(work, struct smbdirect_socket, recv_io.posted.refill_work);
+	int posted;
+
+	posted = smbdirect_connection_recv_io_refill(sc);
+	if (unlikely(posted < 0)) {
+		smbdirect_connection_schedule_disconnect(sc, posted);
+		return;
+	}
+	if (posted > 0) {
+		smbdirect_log_keep_alive(sc, SMBDIRECT_LOG_INFO,
+			"schedule send of an empty message\n");
+		queue_work(sc->workqueue, &sc->idle.immediate_work);
+	}
 }
 
 static bool smbdirect_map_sges_single_page(struct smbdirect_map_sges *state,
