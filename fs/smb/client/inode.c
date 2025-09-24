@@ -2690,7 +2690,7 @@ cifs_dentry_needs_reval(struct dentry *dentry)
 	struct cifsInodeInfo *cifs_i = CIFS_I(inode);
 	struct cifs_sb_info *cifs_sb = CIFS_SB(inode->i_sb);
 	struct cifs_tcon *tcon = cifs_sb_master_tcon(cifs_sb);
-	struct cached_fid *cfid = NULL;
+	struct cached_fid *cfid;
 
 	if (test_bit(CIFS_INO_DELETE_PENDING, &cifs_i->flags))
 		return false;
@@ -2703,13 +2703,14 @@ cifs_dentry_needs_reval(struct dentry *dentry)
 	if (!lookupCacheEnabled)
 		return true;
 
-	if (!open_cached_dir_by_dentry(tcon, dentry->d_parent, &cfid)) {
-		if (cifs_i->time > cfid->time) {
-			close_cached_dir(cfid);
-			return false;
-		}
+	cfid = find_cached_dir(tcon->cfids, dentry->d_parent, CFID_LOOKUP_DENTRY);
+	if (cfid) {
+		bool valid = time_after(cifs_i->time, cfid->time);
+
 		close_cached_dir(cfid);
+		return !valid;
 	}
+
 	/*
 	 * depending on inode type, check if attribute caching disabled for
 	 * files or directories

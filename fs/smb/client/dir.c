@@ -677,7 +677,6 @@ cifs_lookup(struct inode *parent_dir_inode, struct dentry *direntry,
 	const char *full_path;
 	void *page;
 	int retry_count = 0;
-	struct cached_fid *cfid = NULL;
 
 	xid = get_xid();
 
@@ -728,16 +727,24 @@ cifs_lookup(struct inode *parent_dir_inode, struct dentry *direntry,
 		 * correct action even if case insensitive is not forced on
 		 * mount.
 		 */
-		if (pTcon->nocase && !open_cached_dir_by_dentry(pTcon, direntry->d_parent, &cfid)) {
+		if (pTcon->nocase) {
+			struct cached_fid *cfid = find_cached_dir(pTcon->cfids, direntry->d_parent,
+								  CFID_LOOKUP_DENTRY);
+
 			/*
-			 * dentry is negative and parent is fully cached:
-			 * we can assume file does not exist
+			 * dentry is negative and parent is fully cached, we can assume file does
+			 * not exist
+			 *
+			 * reuse rc here
 			 */
-			if (cfid->dirents.is_valid) {
+			rc = 0;
+			if (cfid) {
+				rc = cfid->dirents.is_valid;
 				close_cached_dir(cfid);
-				goto out;
 			}
-			close_cached_dir(cfid);
+
+			if (rc)
+				goto out;
 		}
 	}
 	cifs_dbg(FYI, "Full path: %s inode = 0x%p\n",
@@ -785,7 +792,6 @@ cifs_d_revalidate(struct inode *dir, const struct qstr *name,
 		  struct dentry *direntry, unsigned int flags)
 {
 	struct inode *inode = NULL;
-	struct cached_fid *cfid;
 	int rc;
 
 	if (flags & LOOKUP_RCU)
@@ -835,17 +841,20 @@ cifs_d_revalidate(struct inode *dir, const struct qstr *name,
 	} else {
 		struct cifs_sb_info *cifs_sb = CIFS_SB(dir->i_sb);
 		struct cifs_tcon *tcon = cifs_sb_master_tcon(cifs_sb);
+		struct cached_fid *cfid = find_cached_dir(tcon->cfids, direntry->d_parent,
+							  CFID_LOOKUP_DENTRY);
 
-		if (!open_cached_dir_by_dentry(tcon, direntry->d_parent, &cfid)) {
+		if (cfid) {
 			/*
-			 * dentry is negative and parent is fully cached:
-			 * we can assume file does not exist
+			 * dentry is negative and parent is fully cached, we can assume file does
+			 * not exist
+			 *
+			 * reuse rc here
 			 */
-			if (cfid->dirents.is_valid) {
-				close_cached_dir(cfid);
-				return 1;
-			}
+			rc = cfid->dirents.is_valid;
 			close_cached_dir(cfid);
+			if (rc)
+				return 1;
 		}
 	}
 

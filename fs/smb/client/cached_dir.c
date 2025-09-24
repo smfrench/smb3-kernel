@@ -52,27 +52,63 @@ static inline void drop_cfid(struct cached_fid *cfid)
 	}
 }
 
-static struct cached_fid *find_cached_dir(struct cached_fids *cfids, const char *path)
+/*
+ * Find a cached dir based on @key and @mode (raw lookup).
+ * The only validation done here is if cfid is not going down (last_access_time != 1).
+ *
+ * If @wait_open is true, keep retrying until cfid transitions from 'opening' to valid/invalid.
+ *
+ * Callers must handle any other validation as needed.
+ * Returned cfid, if found, has a ref taken, regardless of state.
+ */
+static struct cached_fid *find_cfid(struct cached_fids *cfids, const void *key, int mode,
+				    bool wait_open)
 {
-	struct cached_fid *cfid;
+	struct cached_fid *cfid, *found;
+	bool match;
 
+	if (!cfids || !key)
+		return NULL;
+
+retry_find:
+	found = NULL;
+
+	spin_lock(&cfids->cfid_list_lock);
 	list_for_each_entry(cfid, &cfids->entries, entry) {
-		if (!strcmp(cfid->path, path)) {
-			/*
-			 * If it doesn't have a lease it is either not yet
-			 * fully cached or it may be in the process of
-			 * being deleted due to a lease break.
-			 */
-			if (!is_valid_cached_dir(cfid))
-				return NULL;
+		/* don't even bother checking if it's going away */
+		if (cfid->last_access_time == 1)
+			continue;
 
-			cfid->last_access_time = jiffies;
+		if (mode == CFID_LOOKUP_PATH)
+			match = !strcmp(cfid->path, (char *)key);
+
+		if (mode == CFID_LOOKUP_DENTRY)
+			match = (cfid->dentry == key);
+
+		if (mode == CFID_LOOKUP_LEASEKEY)
+			match = !memcmp(cfid->fid.lease_key, (u8 *)key, SMB2_LEASE_KEY_SIZE);
+
+		if (!match)
+			continue;
+
+		/* only get a ref here if not waiting for open */
+		if (!wait_open)
 			kref_get(&cfid->refcount);
-			return cfid;
-		}
+		found = cfid;
+		break;
+	}
+	spin_unlock(&cfids->cfid_list_lock);
+
+	if (wait_open && found) {
+		/* cfid is being opened in open_cached_dir(), retry lookup */
+		if (found->has_lease && !found->time && !found->last_access_time)
+			goto retry_find;
+
+		/* we didn't get a ref above, so get one now */
+		kref_get(&found->refcount);
 	}
 
-	return NULL;
+	return found;
 }
 
 static struct dentry *
@@ -132,13 +168,37 @@ static const char *path_no_prefix(struct cifs_sb_info *cifs_sb,
 }
 
 /*
+ * Find a cached dir based on @key and @mode (caller exposed).
+ * This function will retry lookup if cfid found is in opening state.
+ *
+ * Returns valid cfid (with updated last_access_time) or NULL.
+ */
+struct cached_fid *find_cached_dir(struct cached_fids *cfids, const void *key, int mode)
+{
+	struct cached_fid *cfid;
+
+	if (!cfids || !key)
+		return NULL;
+
+	cfid = find_cfid(cfids, key, mode, true);
+	if (cfid) {
+		if (is_valid_cached_dir(cfid)) {
+			cfid->last_access_time = jiffies;
+		} else {
+			kref_put(&cfid->refcount, smb2_close_cached_fid);
+			cfid = NULL;
+		}
+	}
+
+	return cfid;
+}
+
+/*
  * Open the and cache a directory handle.
  * If error then *cfid is not initialized.
  */
-int open_cached_dir(unsigned int xid, struct cifs_tcon *tcon,
-		    const char *path,
-		    struct cifs_sb_info *cifs_sb,
-		    bool lookup_only, struct cached_fid **ret_cfid)
+int open_cached_dir(unsigned int xid, struct cifs_tcon *tcon, const char *path,
+		    struct cifs_sb_info *cifs_sb, struct cached_fid **ret_cfid)
 {
 	struct cifs_ses *ses;
 	struct TCP_Server_Info *server;
@@ -154,7 +214,7 @@ int open_cached_dir(unsigned int xid, struct cifs_tcon *tcon,
 	__le16 *utf16_path = NULL;
 	u8 oplock = SMB2_OPLOCK_LEVEL_II;
 	struct cifs_fid *pfid;
-	struct dentry *dentry = NULL;
+	struct dentry *dentry;
 	struct cached_fid *cfid;
 	struct cached_fids *cfids;
 	const char *npath;
@@ -176,6 +236,9 @@ replay_again:
 	/* reinitialize for possible replay */
 	flags = 0;
 	oplock = SMB2_OPLOCK_LEVEL_II;
+	dentry = NULL;
+	cfid = NULL;
+	*ret_cfid = NULL;
 	server = cifs_pick_channel(ses);
 
 	if (!server->ops->new_lease_key)
@@ -185,27 +248,25 @@ replay_again:
 	if (!utf16_path)
 		return -ENOMEM;
 
+	/* find_cached_dir() already checks if cfid is valid, so no need to check here */
+	cfid = find_cached_dir(cfids, path, CFID_LOOKUP_PATH);
+	if (cfid) {
+		rc = 0;
+		goto out;
+	}
+
 	spin_lock(&cfids->cfid_list_lock);
 	if (cfids->num_entries >= tcon->max_cached_dirs) {
 		spin_unlock(&cfids->cfid_list_lock);
-		kfree(utf16_path);
-		return -ENOENT;
-	}
-
-	/* find_cached_dir() already checks if cfid is valid, so no need to check here */
-	cfid = find_cached_dir(cfids, path);
-	if (cfid || lookup_only) {
-		*ret_cfid = cfid;
-		spin_unlock(&cfids->cfid_list_lock);
-		kfree(utf16_path);
-		return cfid ? 0 : -ENOENT;
+		rc = -ENOENT;
+		goto out;
 	}
 
 	cfid = init_cached_dir(path);
 	if (!cfid) {
 		spin_unlock(&cfids->cfid_list_lock);
-		kfree(utf16_path);
-		return -ENOMEM;
+		rc = -ENOMEM;
+		goto out;
 	}
 
 	cfid->cfids = cfids;
@@ -392,8 +453,10 @@ out:
 		rc = -ENOENT;
 
 	if (rc) {
-		drop_cfid(cfid);
-		kref_put(&cfid->refcount, smb2_close_cached_fid);
+		if (cfid) {
+			drop_cfid(cfid);
+			kref_put(&cfid->refcount, smb2_close_cached_fid);
+		}
 	} else {
 		*ret_cfid = cfid;
 		atomic_inc(&tcon->num_remote_opens);
@@ -405,34 +468,6 @@ out:
 		goto replay_again;
 
 	return rc;
-}
-
-int open_cached_dir_by_dentry(struct cifs_tcon *tcon,
-			      struct dentry *dentry,
-			      struct cached_fid **ret_cfid)
-{
-	struct cached_fid *cfid;
-	struct cached_fids *cfids = tcon->cfids;
-
-	if (cfids == NULL)
-		return -EOPNOTSUPP;
-
-	if (!dentry)
-		return -ENOENT;
-
-	spin_lock(&cfids->cfid_list_lock);
-	list_for_each_entry(cfid, &cfids->entries, entry) {
-		if (is_valid_cached_dir(cfid) && cfid->dentry == dentry) {
-			cifs_dbg(FYI, "found a cached file handle by dentry\n");
-			kref_get(&cfid->refcount);
-			*ret_cfid = cfid;
-			cfid->last_access_time = jiffies;
-			spin_unlock(&cfids->cfid_list_lock);
-			return 0;
-		}
-	}
-	spin_unlock(&cfids->cfid_list_lock);
-	return -ENOENT;
 }
 
 static void
@@ -478,7 +513,7 @@ void drop_cached_dir_by_name(struct cached_fids *cfids, const char *name)
 	if (!cfids)
 		return;
 
-	cfid = find_cached_dir(cfids, name);
+	cfid = find_cached_dir(cfids, name, CFID_LOOKUP_PATH);
 	if (!cfid) {
 		cifs_dbg(FYI, "no cached dir found for rmdir(%s)\n", name);
 		return;
@@ -558,35 +593,31 @@ bool cached_dir_lease_break(struct cifs_tcon *tcon, __u8 lease_key[16])
 {
 	struct cached_fids *cfids = tcon->cfids;
 	struct cached_fid *cfid;
-	bool found = false;
 
 	if (cfids == NULL)
 		return false;
 
-	spin_lock(&cfids->cfid_list_lock);
-	list_for_each_entry(cfid, &cfids->entries, entry) {
-		if (cfid->has_lease &&
-		    !memcmp(lease_key,
-			    cfid->fid.lease_key,
-			    SMB2_LEASE_KEY_SIZE)) {
-			/*
-			 * We found a lease, invalidate cfid and schedule immediate cleanup on
-			 * laundromat.
-			 * No need to take a ref here, as we still hold our initial one.
-			 */
-			invalidate_cfid(cfid);
-			cfid->has_lease = false;
-			found = true;
-			break;
-		}
-	}
-	spin_unlock(&cfids->cfid_list_lock);
+	/*
+	 * Raw lookup here as we _must_ find our lease, no matter cfid state.
+	 * Also, this lease break might be coming from the SMB2 open in open_cached_dir(), so no
+	 * need to wait for it to finish.
+	 */
+	cfid = find_cfid(cfids, lease_key, CFID_LOOKUP_LEASEKEY, false);
+	if (cfid) {
+		/* found a lease, invalidate cfid and schedule immediate cleanup on laundromat */
+		spin_lock(&cfids->cfid_list_lock);
+		invalidate_cfid(cfid);
+		cfid->has_lease = false;
+		spin_unlock(&cfids->cfid_list_lock);
 
-	/* avoid unnecessary scheduling */
-	if (found)
+		/* put lookup ref */
+		kref_put(&cfid->refcount, smb2_close_cached_fid);
 		mod_delayed_work(cfid_put_wq, &cfids->laundromat_work, 0);
 
-	return found;
+		return true;
+	}
+
+	return false;
 }
 
 static struct cached_fid *init_cached_dir(const char *path)

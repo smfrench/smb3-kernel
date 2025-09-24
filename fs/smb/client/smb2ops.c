@@ -882,7 +882,7 @@ smb3_qfs_tcon(const unsigned int xid, struct cifs_tcon *tcon,
 		.fid = &fid,
 	};
 
-	rc = open_cached_dir(xid, tcon, "", cifs_sb, false, &cfid);
+	rc = open_cached_dir(xid, tcon, "", cifs_sb, &cfid);
 	if (rc == 0)
 		memcpy(&fid, &cfid->fid, sizeof(struct cifs_fid));
 	else
@@ -952,8 +952,8 @@ smb2_is_path_accessible(const unsigned int xid, struct cifs_tcon *tcon,
 	bool islink;
 	int rc, rc2;
 
-	rc = open_cached_dir(xid, tcon, full_path, cifs_sb, true, &cfid);
-	if (!rc) {
+	cfid = find_cached_dir(tcon->cfids, full_path, CFID_LOOKUP_PATH);
+	if (cfid) {
 		close_cached_dir(cfid);
 		return 0;
 	}
@@ -2744,8 +2744,8 @@ replay_again:
 	 * We can only call this for things we know are directories.
 	 */
 	if (!strcmp(path, ""))
-		open_cached_dir(xid, tcon, path, cifs_sb, false,
-				&cfid); /* cfid null if open dir failed */
+		/* cfid null if open dir failed */
+		open_cached_dir(xid, tcon, path, cifs_sb, &cfid);
 
 	rqst[0].rq_iov = vars->open_iov;
 	rqst[0].rq_nvec = SMB2_CREATE_IOV_SIZE;

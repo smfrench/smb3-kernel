@@ -964,12 +964,10 @@ int smb2_query_path_info(const unsigned int xid,
 	 * is fast enough (always using the compounded version).
 	 */
 	if (!tcon->posix_extensions) {
-		if (*full_path) {
-			rc = -ENOENT;
-		} else {
-			rc = open_cached_dir(xid, tcon, full_path,
-					     cifs_sb, false, &cfid);
-		}
+		rc = -ENOENT;
+		if (!*full_path)
+			rc = open_cached_dir(xid, tcon, full_path, cifs_sb, &cfid);
+
 		/* If it is a root and its handle is cached then use it */
 		if (!rc) {
 			if (cfid->file_all_info_is_valid) {
