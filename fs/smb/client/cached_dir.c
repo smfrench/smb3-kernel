@@ -16,11 +16,6 @@ static struct cached_fid *init_cached_dir(const char *path);
 static void free_cached_dir(struct cached_fid *cfid);
 static void smb2_close_cached_fid(struct kref *ref);
 
-struct cached_dir_dentry {
-	struct list_head entry;
-	struct dentry *dentry;
-};
-
 static inline void invalidate_cfid(struct cached_fid *cfid)
 {
 	/* callers must hold the list lock and do any list operations (del/move) themselves */
@@ -506,6 +501,27 @@ void close_cached_dir(struct cached_fid *cfid)
 	kref_put(&cfid->refcount, smb2_close_cached_fid);
 }
 
+static void invalidate_all_cfids(struct cached_fids *cfids, bool closed)
+{
+	struct cached_fid *cfid, *q;
+
+	if (!cfids)
+		return;
+
+	/* mark all the cfids as closed and invalidate them for laundromat cleanup */
+	spin_lock(&cfids->cfid_list_lock);
+	list_for_each_entry_safe(cfid, q, &cfids->entries, entry) {
+		invalidate_cfid(cfid);
+		cfid->has_lease = false;
+		if (closed)
+			cfid->is_open = false;
+	}
+	spin_unlock(&cfids->cfid_list_lock);
+
+	/* run laundromat unconditionally now as there might have been previously queued work */
+	mod_delayed_work(cfid_put_wq, &cfids->laundromat_work, 0);
+}
+
 /*
  * Called from cifs_kill_sb when we unmount a share
  */
@@ -513,12 +529,8 @@ void close_all_cached_dirs(struct cifs_sb_info *cifs_sb)
 {
 	struct rb_root *root = &cifs_sb->tlink_tree;
 	struct rb_node *node;
-	struct cached_fid *cfid;
 	struct cifs_tcon *tcon;
 	struct tcon_link *tlink;
-	struct cached_fids *cfids;
-	struct cached_dir_dentry *tmp_list, *q;
-	LIST_HEAD(entry);
 
 	spin_lock(&cifs_sb->tlink_tree_lock);
 	for (node = rb_first(root); node; node = rb_next(node)) {
@@ -526,44 +538,10 @@ void close_all_cached_dirs(struct cifs_sb_info *cifs_sb)
 		tcon = tlink_tcon(tlink);
 		if (IS_ERR(tcon))
 			continue;
-		cfids = tcon->cfids;
-		if (cfids == NULL)
-			continue;
-		spin_lock(&cfids->cfid_list_lock);
-		list_for_each_entry(cfid, &cfids->entries, entry) {
-			invalidate_cfid(cfid);
 
-			tmp_list = kmalloc(sizeof(*tmp_list), GFP_ATOMIC);
-			if (tmp_list == NULL) {
-				/*
-				 * If the malloc() fails, we won't drop all
-				 * dentries, and unmounting is likely to trigger
-				 * a 'Dentry still in use' error.
-				 */
-				cifs_tcon_dbg(VFS, "Out of memory while dropping dentries\n");
-				spin_unlock(&cfids->cfid_list_lock);
-				spin_unlock(&cifs_sb->tlink_tree_lock);
-				goto done;
-			}
-
-			tmp_list->dentry = cfid->dentry;
-			cfid->dentry = NULL;
-
-			list_add_tail(&tmp_list->entry, &entry);
-		}
-		spin_unlock(&cfids->cfid_list_lock);
-
-		/* run laundromat now as it might not have been queued */
-		mod_delayed_work(cfid_put_wq, &cfids->laundromat_work, 0);
+		invalidate_all_cfids(tcon->cfids, false);
 	}
 	spin_unlock(&cifs_sb->tlink_tree_lock);
-
-done:
-	list_for_each_entry_safe(tmp_list, q, &entry, entry) {
-		list_del(&tmp_list->entry);
-		dput(tmp_list->dentry);
-		kfree(tmp_list);
-	}
 
 	/* Flush any pending work that will drop dentries */
 	flush_workqueue(cfid_put_wq);
@@ -573,24 +551,12 @@ done:
  * Invalidate all cached dirs when a TCON has been reset
  * due to a session loss.
  */
-void invalidate_all_cached_dirs(struct cifs_tcon *tcon)
+void invalidate_all_cached_dirs(struct cached_fids *cfids)
 {
-	struct cached_fids *cfids = tcon->cfids;
-	struct cached_fid *cfid;
-
 	if (cfids == NULL)
 		return;
 
-	/* mark all the cfids as closed and invalidate them for laundromat cleanup */
-	spin_lock(&cfids->cfid_list_lock);
-	list_for_each_entry(cfid, &cfids->entries, entry) {
-		invalidate_cfid(cfid);
-		cfid->is_open = false;
-	}
-	spin_unlock(&cfids->cfid_list_lock);
-
-	/* run laundromat unconditionally now as there might have been previously queued work */
-	mod_delayed_work(cfid_put_wq, &cfids->laundromat_work, 0);
+	invalidate_all_cfids(cfids, true);
 	flush_delayed_work(&cfids->laundromat_work);
 }
 
@@ -737,35 +703,4 @@ struct cached_fids *init_cached_dirs(void)
 	atomic64_set(&cfids->total_dirents_bytes, 0);
 
 	return cfids;
-}
-
-/*
- * Called from tconInfoFree when we are tearing down the tcon.
- * There are no active users or open files/directories at this point.
- */
-void free_cached_dirs(struct cached_fids *cfids)
-{
-	struct cached_fid *cfid, *q;
-	LIST_HEAD(entry);
-
-	if (cfids == NULL)
-		return;
-
-	cancel_delayed_work_sync(&cfids->laundromat_work);
-
-	spin_lock(&cfids->cfid_list_lock);
-	list_for_each_entry_safe(cfid, q, &cfids->entries, entry) {
-		invalidate_cfid(cfid);
-		cfid->is_open = false;
-		list_move(&cfid->entry, &entry);
-	}
-	spin_unlock(&cfids->cfid_list_lock);
-
-	list_for_each_entry_safe(cfid, q, &entry, entry) {
-		list_del(&cfid->entry);
-		drop_cfid(cfid);
-		free_cached_dir(cfid);
-	}
-
-	kfree(cfids);
 }

@@ -140,7 +140,7 @@ static void cifs_drop_all_dir_caches(void)
 			if (cifs_ses_exiting(ses))
 				continue;
 			list_for_each_entry(tcon, &ses->tcon_list, tcon_list)
-				invalidate_all_cached_dirs(tcon);
+				invalidate_all_cached_dirs(tcon->cfids);
 		}
 	}
 	spin_unlock(&cifs_tcp_ses_lock);
