@@ -649,6 +649,9 @@ static struct cached_fid *init_cached_dir(const char *path)
 	/* this is caller ref */
 	kref_get(&cfid->refcount);
 
+	/* initial cached dirents position */
+	cfid->dirents.pos = 2;
+
 	return cfid;
 }
 
