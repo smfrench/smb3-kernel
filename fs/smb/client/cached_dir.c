@@ -13,7 +13,6 @@
 #include "cached_dir.h"
 
 static struct cached_fid *init_cached_dir(const char *path);
-static void free_cached_dir(struct cached_fid *cfid);
 static void smb2_close_cached_fid(struct kref *ref);
 
 static inline void invalidate_cfid(struct cached_fid *cfid)
@@ -459,6 +458,7 @@ static void
 smb2_close_cached_fid(struct kref *ref)
 {
 	struct cached_fid *cfid = container_of(ref, struct cached_fid, refcount);
+	struct cached_dirent *de, *q;
 
 	/*
 	 * There's no way a valid cfid can reach here.
@@ -477,7 +477,17 @@ smb2_close_cached_fid(struct kref *ref)
 		list_del(&cfid->entry);
 
 	drop_cfid(cfid);
-	free_cached_dir(cfid);
+
+	/* Delete all cached dirent names */
+	list_for_each_entry_safe(de, q, &cfid->dirents.entries, entry) {
+		list_del(&de->entry);
+		kfree(de->name);
+		kfree(de);
+	}
+
+	kfree(cfid->path);
+	cfid->path = NULL;
+	kfree(cfid);
 }
 
 void drop_cached_dir_by_name(const unsigned int xid, struct cifs_tcon *tcon,
@@ -613,39 +623,6 @@ static struct cached_fid *init_cached_dir(const char *path)
 	mutex_init(&cfid->dirents.de_mutex);
 	kref_init(&cfid->refcount);
 	return cfid;
-}
-
-static void free_cached_dir(struct cached_fid *cfid)
-{
-	struct cached_dirent *dirent, *q;
-
-	/*
-	 * Delete all cached dirent names
-	 */
-	list_for_each_entry_safe(dirent, q, &cfid->dirents.entries, entry) {
-		list_del(&dirent->entry);
-		kfree(dirent->name);
-		kfree(dirent);
-	}
-
-	/* adjust tcon-level counters and reset per-dir accounting */
-	if (cfid->cfids) {
-		if (cfid->dirents.entries_count)
-			atomic_long_sub((long)cfid->dirents.entries_count,
-					&cfid->cfids->total_dirents_entries);
-		if (cfid->dirents.bytes_used) {
-			atomic64_sub((long long)cfid->dirents.bytes_used,
-					&cfid->cfids->total_dirents_bytes);
-			atomic64_sub((long long)cfid->dirents.bytes_used,
-					&cifs_dircache_bytes_used);
-		}
-	}
-	cfid->dirents.entries_count = 0;
-	cfid->dirents.bytes_used = 0;
-
-	kfree(cfid->path);
-	cfid->path = NULL;
-	kfree(cfid);
 }
 
 static void cfids_laundromat_worker(struct work_struct *work)
