@@ -38,7 +38,6 @@ struct cached_fid {
 	const char *path;
 	bool has_lease:1;
 	bool is_open:1;
-	bool on_list:1;
 	bool file_all_info_is_valid:1;
 	unsigned long time; /* jiffies of when lease was taken */
 	unsigned long last_access_time; /* jiffies of when last accessed */
@@ -65,15 +64,19 @@ struct cached_fids {
 	atomic64_t total_dirents_bytes;
 };
 
-/* Module-wide directory cache accounting (defined in cifsfs.c) */
-extern atomic64_t cifs_dircache_bytes_used; /* bytes across all mounts */
-
-static inline bool
-is_valid_cached_dir(struct cached_fid *cfid)
+static inline bool cfid_expired(const struct cached_fid *cfid)
 {
-	return cfid->time && cfid->has_lease;
+	return (cfid->last_access_time &&
+		time_is_before_jiffies(cfid->last_access_time + HZ * dir_cache_timeout));
 }
 
+static inline bool is_valid_cached_dir(struct cached_fid *cfid)
+{
+	return (cfid->time && cfid->has_lease && !cfid_expired(cfid));
+}
+
+/* Module-wide directory cache accounting (defined in cifsfs.c) */
+extern atomic64_t cifs_dircache_bytes_used; /* bytes across all mounts */
 extern struct cached_fids *init_cached_dirs(void);
 extern void free_cached_dirs(struct cached_fids *cfids);
 extern int open_cached_dir(unsigned int xid, struct cifs_tcon *tcon,

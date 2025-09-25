@@ -15,7 +15,6 @@
 static struct cached_fid *init_cached_dir(const char *path);
 static void free_cached_dir(struct cached_fid *cfid);
 static void smb2_close_cached_fid(struct kref *ref);
-static void cfids_laundromat_worker(struct work_struct *work);
 
 struct cached_dir_dentry {
 	struct list_head entry;
@@ -27,11 +26,10 @@ static inline void invalidate_cfid(struct cached_fid *cfid)
 	/* callers must hold the list lock and do any list operations (del/move) themselves */
 	lockdep_assert_held(&cfid->cfids->cfid_list_lock);
 
-	if (cfid->on_list)
+	if (is_valid_cached_dir(cfid))
 		cfid->cfids->num_entries--;
 
 	/* do not change other fields here! */
-	cfid->on_list = false;
 	cfid->time = 0;
 	cfid->last_access_time = 1;
 }
@@ -76,6 +74,7 @@ static struct cached_fid *find_or_create_cached_dir(struct cached_fids *cfids,
 			 */
 			if (!is_valid_cached_dir(cfid))
 				return NULL;
+
 			kref_get(&cfid->refcount);
 			return cfid;
 		}
@@ -93,7 +92,6 @@ static struct cached_fid *find_or_create_cached_dir(struct cached_fids *cfids,
 	cfid->cfids = cfids;
 	cfids->num_entries++;
 	list_add(&cfid->entry, &cfids->entries);
-	cfid->on_list = true;
 	kref_get(&cfid->refcount);
 	/*
 	 * Set @cfid->has_lease to true during construction so that the lease
@@ -260,6 +258,7 @@ replay_again:
 	} else {
 		dentry = path_to_dentry(cifs_sb, npath);
 		if (IS_ERR(dentry)) {
+			dentry = NULL;
 			rc = -ENOENT;
 			goto out;
 		}
@@ -269,14 +268,14 @@ replay_again:
 			spin_lock(&cfids->cfid_list_lock);
 			list_for_each_entry(parent_cfid, &cfids->entries, entry) {
 				if (parent_cfid->dentry == dentry->d_parent) {
+					if (!is_valid_cached_dir(parent_cfid))
+						break;
+
 					cifs_dbg(FYI, "found a parent cached file handle\n");
-					if (is_valid_cached_dir(parent_cfid)) {
-						lease_flags
-							|= SMB2_LEASE_FLAG_PARENT_LEASE_KEY_SET_LE;
-						memcpy(pfid->parent_lease_key,
-						       parent_cfid->fid.lease_key,
-						       SMB2_LEASE_KEY_SIZE);
-					}
+
+					lease_flags |= SMB2_LEASE_FLAG_PARENT_LEASE_KEY_SET_LE;
+					memcpy(pfid->parent_lease_key, parent_cfid->fid.lease_key,
+					       SMB2_LEASE_KEY_SIZE);
 					break;
 				}
 			}
@@ -285,6 +284,7 @@ replay_again:
 	}
 	cfid->dentry = dentry;
 	cfid->tcon = tcon;
+	dentry = NULL;
 
 	/*
 	 * We do not hold the lock for the open because in case
@@ -412,24 +412,12 @@ oshr_free:
 	free_rsp_buf(resp_buftype[0], rsp_iov[0].iov_base);
 	free_rsp_buf(resp_buftype[1], rsp_iov[1].iov_base);
 out:
-	if (rc) {
-		spin_lock(&cfids->cfid_list_lock);
-		if (cfid->on_list) {
-			list_del(&cfid->entry);
-			cfid->on_list = false;
-			cfids->num_entries--;
-		}
-		if (cfid->has_lease) {
-			/*
-			 * We are guaranteed to have two references at this
-			 * point. One for the caller and one for a potential
-			 * lease. Release one here, and the second below.
-			 */
-			cfid->has_lease = false;
-			kref_put(&cfid->refcount, smb2_close_cached_fid);
-		}
-		spin_unlock(&cfids->cfid_list_lock);
+	/* cfid invalidated in the mean time, drop it below */
+	if (!rc && !is_valid_cached_dir(cfid))
+		rc = -ENOENT;
 
+	if (rc) {
+		drop_cfid(cfid);
 		kref_put(&cfid->refcount, smb2_close_cached_fid);
 	} else {
 		*ret_cfid = cfid;
@@ -459,9 +447,7 @@ int open_cached_dir_by_dentry(struct cifs_tcon *tcon,
 
 	spin_lock(&cfids->cfid_list_lock);
 	list_for_each_entry(cfid, &cfids->entries, entry) {
-		if (cfid->dentry == dentry) {
-			if (!is_valid_cached_dir(cfid))
-				break;
+		if (is_valid_cached_dir(cfid) && cfid->dentry == dentry) {
 			cifs_dbg(FYI, "found a cached file handle by dentry\n");
 			kref_get(&cfid->refcount);
 			*ret_cfid = cfid;
@@ -480,23 +466,20 @@ smb2_close_cached_fid(struct kref *ref)
 	struct cached_fid *cfid = container_of(ref, struct cached_fid, refcount);
 
 	/*
-	 * There's no way a cfid can reach here with ->on_list == true.
+	 * There's no way a valid cfid can reach here.
 	 *
-	 * This is because we hould our own ref, and whenever we put it, we invalidate the cfid
-	 * (which sets ->on_list to false).
+	 * This is because we hould our own ref, and whenever we put it, we invalidate the cfid.
 	 *
-	 * So even if an external caller puts the last ref, ->on_list will already have been set to
-	 * false by then by one of the invalidations that can happen concurrently, e.g. lease break,
+	 * So even if an external caller puts the last ref, cfid will already have been invalidated
+	 * by then by one of the invalidations that can happen concurrently, e.g. lease break,
 	 * invalidate_all_cached_dirs().
 	 *
-	 * So this check is mostly for precaution, but since we can still take the correct actions
-	 * if it's the case, do so.
+	 * So this check is mostly for precaution, but since we can still take the correct action
+	 * (just list_del()) if it's the case, do so.
 	 */
-	if (WARN_ON(cfid->on_list)) {
+	if (WARN_ON(is_valid_cached_dir(cfid)))
+		/* remaining invalidation done by drop_cfid() below */
 		list_del(&cfid->entry);
-		cfid->on_list = false;
-		cfid->cfids->num_entries--;
-	}
 
 	drop_cfid(cfid);
 	free_cached_dir(cfid);
@@ -593,14 +576,14 @@ done:
 void invalidate_all_cached_dirs(struct cifs_tcon *tcon)
 {
 	struct cached_fids *cfids = tcon->cfids;
-	struct cached_fid *cfid, *q;
+	struct cached_fid *cfid;
 
 	if (cfids == NULL)
 		return;
 
 	/* mark all the cfids as closed and invalidate them for laundromat cleanup */
 	spin_lock(&cfids->cfid_list_lock);
-	list_for_each_entry_safe(cfid, q, &cfids->entries, entry) {
+	list_for_each_entry(cfid, &cfids->entries, entry) {
 		invalidate_cfid(cfid);
 		cfid->is_open = false;
 	}
@@ -709,8 +692,7 @@ static void cfids_laundromat_worker(struct work_struct *work)
 
 	spin_lock(&cfids->cfid_list_lock);
 	list_for_each_entry_safe(cfid, q, &cfids->entries, entry) {
-		if (cfid->last_access_time &&
-		    time_after(jiffies, cfid->last_access_time + HZ * dir_cache_timeout)) {
+		if (cfid_expired(cfid)) {
 			invalidate_cfid(cfid);
 			list_move(&cfid->entry, &entry);
 		}
@@ -728,8 +710,7 @@ static void cfids_laundromat_worker(struct work_struct *work)
 		 * concurrent ref-holders, they'll drop it later (cfid is already invalid at this
 		 * point, so can't be found anymore).
 		 *
-		 * No risk for a double list_del() here because cfid->on_list is always false at
-		 * this point.
+		 * No risk for a double list_del() here because cfid is only on this list now.
 		 */
 		drop_cfid(cfid);
 		kref_put(&cfid->refcount, smb2_close_cached_fid);
