@@ -970,14 +970,17 @@ int smb2_query_path_info(const unsigned int xid,
 
 		/* If it is a root and its handle is cached then use it */
 		if (!rc) {
-			if (cfid->file_all_info_is_valid) {
-				memcpy(&data->fi, &cfid->file_all_info,
-				       sizeof(data->fi));
+			if (cfid->file_all_info) {
+				memcpy(&data->fi, cfid->file_all_info, sizeof(data->fi));
 			} else {
-				rc = SMB2_query_info(xid, tcon,
-						     cfid->fid.persistent_fid,
-						     cfid->fid.volatile_fid,
-						     &data->fi);
+				rc = SMB2_query_info(xid, tcon, cfid->fid.persistent_fid,
+						     cfid->fid.volatile_fid, &data->fi);
+				if (!rc) {
+					cfid->file_all_info = kmemdup(&data->fi, sizeof(data->fi),
+								      GFP_KERNEL);
+					if (!cfid->file_all_info)
+						rc = -ENOMEM;
+				}
 			}
 			close_cached_dir(cfid);
 			return rc;

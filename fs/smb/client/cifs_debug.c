@@ -341,7 +341,7 @@ static int cifs_debug_dirs_proc_show(struct seq_file *m, void *v)
 						ses->Suid,
 						cfid->fid.persistent_fid,
 						cfid->path);
-					if (cfid->file_all_info_is_valid)
+					if (cfid->file_all_info)
 						seq_printf(m, "\tvalid file info");
 					if (cfid->dirents.is_valid)
 						seq_printf(m, ", valid dirents");

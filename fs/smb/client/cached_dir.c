@@ -12,6 +12,9 @@
 #include "smb2proto.h"
 #include "cached_dir.h"
 
+/* since jiffies can never be 1 here, use it as an invalid value to add meaning for our purposes */
+#define CFID_INVALID_TIME 1
+
 static struct cached_fid *init_cached_dir(const char *path);
 static void smb2_close_cached_fid(struct kref *ref);
 
@@ -24,27 +27,28 @@ static inline void invalidate_cfid(struct cached_fid *cfid)
 		cfid->cfids->num_entries--;
 
 	/* do not change other fields here! */
-	cfid->time = 0;
-	cfid->last_access_time = 1;
+	cfid->ctime = CFID_INVALID_TIME;
+	cfid->atime = CFID_INVALID_TIME;
 }
 
 static inline void drop_cfid(struct cached_fid *cfid)
 {
 	struct dentry *dentry = NULL;
+	u64 pfid = 0, vfid = 0;
 
 	spin_lock(&cfid->cfids->cfid_list_lock);
 	invalidate_cfid(cfid);
 
 	swap(cfid->dentry, dentry);
+	swap(cfid->fid.persistent_fid, pfid);
+	swap(cfid->fid.volatile_fid, vfid);
 	spin_unlock(&cfid->cfids->cfid_list_lock);
 
 	dput(dentry);
 
-	if (cfid->is_open) {
-		int rc;
-
-		cfid->is_open = false;
-		rc = SMB2_close(0, cfid->tcon, cfid->fid.persistent_fid, cfid->fid.volatile_fid);
+	if (pfid) {
+		/* cfid->tcon is never set to NULL, so no need to check/swap it */
+		int rc = SMB2_close(0, cfid->tcon, pfid, vfid);
 
 		/* SMB2_close should handle -EBUSY or -EAGAIN */
 		if (rc)
@@ -54,7 +58,7 @@ static inline void drop_cfid(struct cached_fid *cfid)
 
 /*
  * Find a cached dir based on @key and @mode (raw lookup).
- * The only validation done here is if cfid is not going down (last_access_time != 1).
+ * The only validation done here is if cfid is going down (->ctime == CFID_INVALID_TIME).
  *
  * If @wait_open is true, keep retrying until cfid transitions from 'opening' to valid/invalid.
  *
@@ -76,7 +80,7 @@ retry_find:
 	spin_lock(&cfids->cfid_list_lock);
 	list_for_each_entry(cfid, &cfids->entries, entry) {
 		/* don't even bother checking if it's going away */
-		if (cfid->last_access_time == 1)
+		if (cfid->ctime == CFID_INVALID_TIME)
 			continue;
 
 		if (mode == CFID_LOOKUP_PATH)
@@ -101,7 +105,7 @@ retry_find:
 
 	if (wait_open && found) {
 		/* cfid is being opened in open_cached_dir(), retry lookup */
-		if (found->has_lease && !found->time && !found->last_access_time)
+		if (!found->ctime)
 			goto retry_find;
 
 		/* we didn't get a ref above, so get one now */
@@ -183,7 +187,7 @@ struct cached_fid *find_cached_dir(struct cached_fids *cfids, const void *key, i
 	cfid = find_cfid(cfids, key, mode, true);
 	if (cfid) {
 		if (is_valid_cached_dir(cfid)) {
-			cfid->last_access_time = jiffies;
+			cfid->atime = jiffies;
 		} else {
 			kref_put(&cfid->refcount, smb2_close_cached_fid);
 			cfid = NULL;
@@ -205,6 +209,7 @@ int open_cached_dir(unsigned int xid, struct cifs_tcon *tcon, const char *path,
 	struct cifs_open_parms oparms;
 	struct smb2_create_rsp *o_rsp = NULL;
 	struct smb2_query_info_rsp *qi_rsp = NULL;
+	struct smb2_file_all_info info;
 	int resp_buftype[2];
 	struct smb_rqst rqst[2];
 	struct kvec rsp_iov[2];
@@ -239,6 +244,7 @@ replay_again:
 	dentry = NULL;
 	cfid = NULL;
 	*ret_cfid = NULL;
+	memset(&info, 0, sizeof(info));
 	server = cifs_pick_channel(ses);
 
 	if (!server->ops->new_lease_key)
@@ -392,7 +398,6 @@ replay_again:
 		}
 		goto oshr_free;
 	}
-	cfid->is_open = true;
 
 	spin_lock(&cfids->cfid_list_lock);
 
@@ -429,19 +434,21 @@ replay_again:
 		spin_unlock(&cfids->cfid_list_lock);
 		goto oshr_free;
 	}
-	if (!smb2_validate_and_copy_iov(
-				le16_to_cpu(qi_rsp->OutputBufferOffset),
-				sizeof(struct smb2_file_all_info),
-				&rsp_iov[1], sizeof(struct smb2_file_all_info),
-				(char *)&cfid->file_all_info))
-		cfid->file_all_info_is_valid = true;
+	if (!smb2_validate_and_copy_iov(le16_to_cpu(qi_rsp->OutputBufferOffset),
+					sizeof(struct smb2_file_all_info), &rsp_iov[1],
+					sizeof(struct smb2_file_all_info), (char *)&info)) {
+		cfid->file_all_info = kmemdup(&info, sizeof(info), GFP_ATOMIC);
+		if (!cfid->file_all_info) {
+			rc = -ENOMEM;
+			goto out;
+		}
+	}
 
-	cfid->time = jiffies;
-	cfid->last_access_time = jiffies;
+	cfid->ctime = jiffies;
+	cfid->atime = jiffies;
 	spin_unlock(&cfids->cfid_list_lock);
 	/* At this point the directory handle is fully cached */
 	rc = 0;
-
 oshr_free:
 	SMB2_open_free(&rqst[0]);
 	SMB2_query_info_free(&rqst[1]);
@@ -485,6 +492,8 @@ smb2_close_cached_fid(struct kref *ref)
 		kfree(de);
 	}
 
+	kfree(cfid->file_all_info);
+	cfid->file_all_info = NULL;
 	kfree(cfid->path);
 	cfid->path = NULL;
 	kfree(cfid);
@@ -538,9 +547,10 @@ static void invalidate_all_cfids(struct cached_fids *cfids, bool closed)
 	spin_lock(&cfids->cfid_list_lock);
 	list_for_each_entry_safe(cfid, q, &cfids->entries, entry) {
 		invalidate_cfid(cfid);
-		cfid->has_lease = false;
-		if (closed)
-			cfid->is_open = false;
+		if (closed) {
+			cfid->fid.persistent_fid = 0;
+			cfid->fid.volatile_fid = 0;
+		}
 	}
 	spin_unlock(&cfids->cfid_list_lock);
 
@@ -609,16 +619,6 @@ static struct cached_fid *init_cached_dir(const char *path)
 
 	/* this is caller ref */
 	kref_get(&cfid->refcount);
-
-	/*
-	 * Set @cfid->has_lease to true during construction so that the lease
-	 * reference can be put in cached_dir_lease_break() due to a potential
-	 * lease break right after the request is sent or while @cfid is still
-	 * being cached, or if a reconnection is triggered during construction.
-	 * Concurrent processes won't be to use it yet due to @cfid->time being
-	 * zero.
-	 */
-	cfid->has_lease = true;
 
 	return cfid;
 }

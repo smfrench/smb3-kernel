@@ -2705,7 +2705,7 @@ cifs_dentry_needs_reval(struct dentry *dentry)
 
 	cfid = find_cached_dir(tcon->cfids, dentry->d_parent, CFID_LOOKUP_DENTRY);
 	if (cfid) {
-		bool valid = time_after(cifs_i->time, cfid->time);
+		bool valid = time_after(cifs_i->time, cfid->ctime);
 
 		close_cached_dir(cfid);
 		return !valid;
