@@ -660,7 +660,7 @@ smb2_is_valid_lease_break(char *buffer, struct TCP_Server_Info *server)
 			}
 			spin_unlock(&tcon->open_file_lock);
 
-			if (cached_dir_lease_break(tcon, rsp->LeaseKey)) {
+			if (drop_cached_dir(tcon->cfids, rsp->LeaseKey, CFID_LOOKUP_LEASEKEY)) {
 				spin_unlock(&cifs_tcp_ses_lock);
 				return true;
 			}

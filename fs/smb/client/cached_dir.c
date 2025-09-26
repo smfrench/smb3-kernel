@@ -476,22 +476,6 @@ smb2_close_cached_fid(struct kref *ref)
 	struct cached_fid *cfid = container_of(ref, struct cached_fid, refcount);
 	struct cached_dirent *de, *q;
 
-	/*
-	 * There's no way a valid cfid can reach here.
-	 *
-	 * This is because we hould our own ref, and whenever we put it, we invalidate the cfid.
-	 *
-	 * So even if an external caller puts the last ref, cfid will already have been invalidated
-	 * by then by one of the invalidations that can happen concurrently, e.g. lease break,
-	 * invalidate_all_cached_dirs().
-	 *
-	 * So this check is mostly for precaution, but since we can still take the correct action
-	 * (just list_del()) if it's the case, do so.
-	 */
-	if (WARN_ON(is_valid_cached_dir(cfid)))
-		/* remaining invalidation done by drop_cfid() below */
-		list_del(&cfid->entry);
-
 	drop_cfid(cfid);
 
 	/* Delete all cached dirent names */
@@ -506,23 +490,36 @@ smb2_close_cached_fid(struct kref *ref)
 	kfree(cfid);
 }
 
-void drop_cached_dir_by_name(struct cached_fids *cfids, const char *name)
+bool drop_cached_dir(struct cached_fids *cfids, const void *key, int mode)
 {
 	struct cached_fid *cfid;
 
-	if (!cfids)
-		return;
+	if (!cfids || !key)
+		return false;
 
-	cfid = find_cached_dir(cfids, name, CFID_LOOKUP_PATH);
-	if (!cfid) {
-		cifs_dbg(FYI, "no cached dir found for rmdir(%s)\n", name);
-		return;
+	/*
+	 * Raw lookup here as we _must_ find any matching cfid, no matter its state.
+	 * Also, we might be racing with the SMB2 open in open_cached_dir(), so no need to wait
+	 * for it to finish.
+	 */
+	cfid = find_cfid(cfids, key, mode, false);
+	if (!cfid)
+		return false;
+
+	if (mode != CFID_LOOKUP_LEASEKEY) {
+		drop_cfid(cfid);
+	} else {
+		/* we're locked in smb2_is_valid_lease_break(), so can't dput/close here */
+		spin_lock(&cfids->cfid_list_lock);
+		invalidate_cfid(cfid);
+		spin_unlock(&cfids->cfid_list_lock);
 	}
-
-	drop_cfid(cfid);
 
 	/* put lookup ref */
 	kref_put(&cfid->refcount, smb2_close_cached_fid);
+	mod_delayed_work(cfid_put_wq, &cfids->laundromat_work, 0);
+
+	return true;
 }
 
 void close_cached_dir(struct cached_fid *cfid)
@@ -587,37 +584,6 @@ void invalidate_all_cached_dirs(struct cached_fids *cfids)
 
 	invalidate_all_cfids(cfids, true);
 	flush_delayed_work(&cfids->laundromat_work);
-}
-
-bool cached_dir_lease_break(struct cifs_tcon *tcon, __u8 lease_key[16])
-{
-	struct cached_fids *cfids = tcon->cfids;
-	struct cached_fid *cfid;
-
-	if (cfids == NULL)
-		return false;
-
-	/*
-	 * Raw lookup here as we _must_ find our lease, no matter cfid state.
-	 * Also, this lease break might be coming from the SMB2 open in open_cached_dir(), so no
-	 * need to wait for it to finish.
-	 */
-	cfid = find_cfid(cfids, lease_key, CFID_LOOKUP_LEASEKEY, false);
-	if (cfid) {
-		/* found a lease, invalidate cfid and schedule immediate cleanup on laundromat */
-		spin_lock(&cfids->cfid_list_lock);
-		invalidate_cfid(cfid);
-		cfid->has_lease = false;
-		spin_unlock(&cfids->cfid_list_lock);
-
-		/* put lookup ref */
-		kref_put(&cfid->refcount, smb2_close_cached_fid);
-		mod_delayed_work(cfid_put_wq, &cfids->laundromat_work, 0);
-
-		return true;
-	}
-
-	return false;
 }
 
 static struct cached_fid *init_cached_dir(const char *path)

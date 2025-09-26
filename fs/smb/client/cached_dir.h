@@ -89,8 +89,7 @@ extern struct cached_fid *find_cached_dir(struct cached_fids *cfids, const void 
 extern int open_cached_dir(unsigned int xid, struct cifs_tcon *tcon, const char *path,
 			   struct cifs_sb_info *cifs_sb, struct cached_fid **cfid);
 extern void close_cached_dir(struct cached_fid *cfid);
-extern void drop_cached_dir_by_name(struct cached_fids *cfids, const char *name);
+extern bool drop_cached_dir(struct cached_fids *cfids, const void *key, int mode);
 extern void close_all_cached_dirs(struct cifs_sb_info *cifs_sb);
 extern void invalidate_all_cached_dirs(struct cached_fids *cfids);
-extern bool cached_dir_lease_break(struct cifs_tcon *tcon, __u8 lease_key[16]);
 #endif			/* _CACHED_DIR_H */

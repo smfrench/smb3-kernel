@@ -1160,7 +1160,7 @@ smb2_rmdir(const unsigned int xid, struct cifs_tcon *tcon, const char *name,
 {
 	struct cifs_open_parms oparms;
 
-	drop_cached_dir_by_name(tcon->cfids, name);
+	drop_cached_dir(tcon->cfids, name, CFID_LOOKUP_PATH);
 	oparms = CIFS_OPARMS(cifs_sb, tcon, name, DELETE,
 			     FILE_OPEN, CREATE_NOT_FILE, ACL_NO_MODE);
 	return smb2_compound_op(xid, tcon, cifs_sb,
@@ -1315,7 +1315,7 @@ int smb2_rename_path(const unsigned int xid,
 	struct cifsFileInfo *cfile;
 	__u32 co = file_create_options(source_dentry);
 
-	drop_cached_dir_by_name(tcon->cfids, from_name);
+	drop_cached_dir(tcon->cfids, from_name, CFID_LOOKUP_PATH);
 	cifs_get_writable_path(tcon, from_name, FIND_WR_WITH_DELETE, &cfile);
 
 	int rc = smb2_set_path_attr(xid, tcon, from_name, to_name, cifs_sb,
@@ -1597,7 +1597,8 @@ int smb2_rename_pending_delete(const char *full_path,
 		goto out;
 	}
 
-	drop_cached_dir_by_name(tcon->cfids, full_path);
+	drop_cached_dir(tcon->cfids, full_path, CFID_LOOKUP_PATH);
+
 	oparms = CIFS_OPARMS(cifs_sb, tcon, full_path,
 			     DELETE | FILE_WRITE_ATTRIBUTES,
 			     FILE_OPEN, co, ACL_NO_MODE);
