@@ -188,12 +188,32 @@ retry_find:
 	return found;
 }
 
-static struct dentry *
-path_to_dentry(struct cifs_sb_info *cifs_sb, const char *path)
+/*
+ * Skip any prefix paths in @path as lookup_noperm_positive_unlocked() ends up calling ->lookup()
+ * which already adds those through build_path_from_dentry().
+ *
+ * Also, this should be called before sending a network request as we might reconnect and
+ * potentially end up having a different prefix path (e.g. after DFS failover).
+ *
+ * Callers must dput() returned dentry if !IS_ERR().
+ */
+static struct dentry *path_to_dentry(struct cifs_sb_info *cifs_sb, const char *path)
 {
 	struct dentry *dentry;
 	const char *s, *p;
 	char sep;
+
+	if (!*path)
+		return dget(cifs_sb->root);
+
+	if ((cifs_sb->mnt_cifs_flags & CIFS_MOUNT_USE_PREFIX_PATH) && cifs_sb->prepath) {
+		size_t len = strlen(cifs_sb->prepath) + 1;
+
+		if (unlikely(len > strlen(path)))
+			return ERR_PTR(-EINVAL);
+
+		path += len;
+	}
 
 	sep = CIFS_DIR_SEP(cifs_sb);
 	dentry = dget(cifs_sb->root);
@@ -219,29 +239,12 @@ path_to_dentry(struct cifs_sb_info *cifs_sb, const char *path)
 		while (*s && *s != sep)
 			s++;
 
-		child = lookup_noperm_positive_unlocked(&QSTR_LEN(p, s - p),
-							dentry);
+		child = lookup_noperm_positive_unlocked(&QSTR_LEN(p, s - p), dentry);
 		dput(dentry);
 		dentry = child;
 	} while (!IS_ERR(dentry));
+
 	return dentry;
-}
-
-static const char *path_no_prefix(struct cifs_sb_info *cifs_sb,
-				  const char *path)
-{
-	size_t len = 0;
-
-	if (!*path)
-		return path;
-
-	if ((cifs_sb->mnt_cifs_flags & CIFS_MOUNT_USE_PREFIX_PATH) &&
-	    cifs_sb->prepath) {
-		len = strlen(cifs_sb->prepath) + 1;
-		if (unlikely(len > strlen(path)))
-			return ERR_PTR(-EINVAL);
-	}
-	return path + len;
 }
 
 /*
@@ -277,31 +280,29 @@ struct cached_fid *find_cached_dir(struct cached_fids *cfids, const void *key, i
 int open_cached_dir(unsigned int xid, struct cifs_tcon *tcon, const char *path,
 		    struct cifs_sb_info *cifs_sb, struct cached_fid **ret_cfid)
 {
-	struct cifs_ses *ses;
+	int rc, flags = 0, retries = 0, cur_sleep = 1;
+	struct kvec open_iov[SMB2_CREATE_IOV_SIZE];
+	struct smb2_query_info_rsp *qi_rsp = NULL;
 	struct TCP_Server_Info *server;
 	struct cifs_open_parms oparms;
-	struct smb2_create_rsp *o_rsp = NULL;
-	struct smb2_query_info_rsp *qi_rsp = NULL;
 	struct smb2_file_all_info info;
-	int resp_buftype[2];
+	struct smb2_create_rsp *o_rsp = NULL;
+	struct cached_fids *cfids;
+	struct cached_fid *cfid;
 	struct smb_rqst rqst[2];
 	struct kvec rsp_iov[2];
-	struct kvec open_iov[SMB2_CREATE_IOV_SIZE];
-	struct kvec qi_iov[1];
-	int rc, flags = 0;
-	__le16 *utf16_path = NULL;
-	u8 oplock = SMB2_OPLOCK_LEVEL_II;
 	struct cifs_fid *pfid;
 	struct dentry *dentry;
-	struct cached_fid *cfid;
-	struct cached_fids *cfids;
-	const char *npath;
-	int retries = 0, cur_sleep = 1;
+	struct kvec qi_iov[1];
+	struct cifs_ses *ses;
+	int resp_buftype[2];
+	__le16 *utf16_path = NULL;
+	u8 oplock = SMB2_OPLOCK_LEVEL_II;
 
-	if (cifs_sb->root == NULL)
+	if (!cifs_sb->root)
 		return -ENOENT;
 
-	if (tcon == NULL)
+	if (!tcon)
 		return -EOPNOTSUPP;
 
 	ses = tcon->ses;
@@ -331,10 +332,6 @@ replay_again:
 		return 0;
 	}
 
-	utf16_path = cifs_convert_path_to_utf16(path, cifs_sb);
-	if (!utf16_path)
-		return -ENOMEM;
-
 	read_seqlock_excl(&cfids->entries_seqlock);
 	if (cfids->num_entries >= tcon->max_cached_dirs) {
 		read_sequnlock_excl(&cfids->entries_seqlock);
@@ -354,28 +351,11 @@ replay_again:
 	cfid->tcon = tcon;
 	pfid = &cfid->fid;
 
-	/*
-	 * Skip any prefix paths in @path as lookup_noperm_positive_unlocked() ends up
-	 * calling ->lookup() which already adds those through
-	 * build_path_from_dentry().  Also, do it earlier as we might reconnect
-	 * below when trying to send compounded request and then potentially
-	 * having a different prefix path (e.g. after DFS failover).
-	 */
-	npath = path_no_prefix(cifs_sb, path);
-	if (IS_ERR(npath)) {
-		rc = PTR_ERR(npath);
+	dentry = path_to_dentry(cifs_sb, path);
+	if (IS_ERR(dentry)) {
+		rc = PTR_ERR(dentry);
+		dentry = NULL;
 		goto out;
-	}
-
-	if (!npath[0]) {
-		dentry = dget(cifs_sb->root);
-	} else {
-		dentry = path_to_dentry(cifs_sb, npath);
-		if (IS_ERR(dentry)) {
-			dentry = NULL;
-			rc = -ENOENT;
-			goto out;
-		}
 	}
 
 	write_seqlock(&cfids->entries_seqlock);
@@ -415,21 +395,26 @@ replay_again:
 	oparms.fid = pfid;
 	oparms.replay = !!retries;
 
+	utf16_path = cifs_convert_path_to_utf16(path, cifs_sb);
+	if (!utf16_path) {
+		rc = -ENOMEM;
+		goto oshr_free;
+	}
+
 	rc = SMB2_open_init(tcon, server, &rqst[0], &oplock, &oparms, utf16_path);
+	kfree(utf16_path);
+
 	if (rc)
 		goto oshr_free;
-	smb2_set_next_command(tcon, &rqst[0]);
 
+	smb2_set_next_command(tcon, &rqst[0]);
 	memset(&qi_iov, 0, sizeof(qi_iov));
 	rqst[1].rq_iov = qi_iov;
 	rqst[1].rq_nvec = 1;
 
-	rc = SMB2_query_info_init(tcon, server,
-				  &rqst[1], COMPOUND_FID,
-				  COMPOUND_FID, FILE_ALL_INFORMATION,
-				  SMB2_O_INFO_FILE, 0,
-				  sizeof(struct smb2_file_all_info) +
-				  PATH_MAX * 2, 0, NULL);
+	rc = SMB2_query_info_init(tcon, server, &rqst[1], COMPOUND_FID, COMPOUND_FID,
+				  FILE_ALL_INFORMATION, SMB2_O_INFO_FILE, 0,
+				  sizeof(struct smb2_file_all_info) + PATH_MAX * 2, 0, NULL);
 	if (rc)
 		goto oshr_free;
 
@@ -440,14 +425,11 @@ replay_again:
 		smb2_set_replay(server, &rqst[1]);
 	}
 
-	rc = compound_send_recv(xid, ses, server,
-				flags, 2, rqst,
-				resp_buftype, rsp_iov);
+	rc = compound_send_recv(xid, ses, server, flags, 2, rqst, resp_buftype, rsp_iov);
 	if (rc) {
 		if (rc == -EREMCHG) {
 			tcon->need_reconnect = true;
-			pr_warn_once("server share %s deleted\n",
-				     tcon->tree_name);
+			pr_warn_once("server share %s deleted\n", tcon->tree_name);
 		}
 		goto oshr_free;
 	}
@@ -458,7 +440,6 @@ replay_again:
 #ifdef CONFIG_CIFS_DEBUG2
 	oparms.fid->mid = le64_to_cpu(o_rsp->hdr.MessageId);
 #endif /* CIFS_DEBUG2 */
-
 
 	if (o_rsp->OplockLevel != SMB2_OPLOCK_LEVEL_LEASE) {
 		rc = -EINVAL;
@@ -478,9 +459,8 @@ replay_again:
 	if (le32_to_cpu(qi_rsp->OutputBufferLength) < sizeof(struct smb2_file_all_info))
 		goto oshr_free;
 
-	if (!smb2_validate_and_copy_iov(le16_to_cpu(qi_rsp->OutputBufferOffset),
-					sizeof(struct smb2_file_all_info), &rsp_iov[1],
-					sizeof(struct smb2_file_all_info), (char *)&info)) {
+	if (!smb2_validate_and_copy_iov(le16_to_cpu(qi_rsp->OutputBufferOffset), sizeof(info),
+					&rsp_iov[1], sizeof(info), (char *)&info)) {
 		cfid->file_all_info = kmemdup(&info, sizeof(info), GFP_ATOMIC);
 		if (!cfid->file_all_info) {
 			rc = -ENOMEM;
@@ -514,7 +494,6 @@ out:
 		*ret_cfid = cfid;
 		atomic_inc(&tcon->num_remote_opens);
 	}
-	kfree(utf16_path);
 
 	if (is_replayable_error(rc) &&
 	    smb2_should_replay(tcon, &retries, &cur_sleep))
