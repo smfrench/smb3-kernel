@@ -4772,8 +4772,8 @@ handle_read_data(struct TCP_Server_Info *server, struct mid_q_entry *mid,
 		/* read response payload is in buf */
 		WARN_ONCE(buffer, "read data can be either in buf or in buffer");
 		length = copy_to_iter(buf + data_offset, data_len, &rdata->subreq.io_iter);
-		if (length < 0)
-			return length;
+		if (!length)
+			return -1;
 		rdata->got_bytes = data_len;
 	} else {
 		/* read response payload cannot be in both buf and pages */
