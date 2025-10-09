@@ -330,18 +330,20 @@ static int cifs_debug_dirs_proc_show(struct seq_file *m, void *v)
 				cfids = tcon->cfids;
 				if (!cfids)
 					continue;
-				spin_lock(&cfids->cfid_list_lock); /* check lock ordering */
+
+				read_seqlock_excl(&cfids->entries_seqlock);
 				seq_printf(m, "Num entries: %d, cached_dirents: %lu entries, %llu bytes\n",
 						cfids->num_entries,
 						(unsigned long)atomic_long_read(&cfids->total_dirents_entries),
 						(unsigned long long)atomic64_read(&cfids->total_dirents_bytes));
+
 				list_for_each_entry(cfid, &cfids->entries, entry) {
 					seq_printf(m, "0x%x 0x%llx 0x%llx     %s",
 						tcon->tid,
 						ses->Suid,
 						cfid->fid.persistent_fid,
 						cfid->path);
-					if (cfid->file_all_info_is_valid)
+					if (cfid->file_all_info)
 						seq_printf(m, "\tvalid file info");
 					if (cfid->dirents.is_valid)
 						seq_printf(m, ", valid dirents");
@@ -350,7 +352,7 @@ static int cifs_debug_dirs_proc_show(struct seq_file *m, void *v)
 						cfid->dirents.entries_count, cfid->dirents.bytes_used);
 					seq_printf(m, "\n");
 				}
-				spin_unlock(&cfids->cfid_list_lock);
+				read_sequnlock_excl(&cfids->entries_seqlock);
 			}
 		}
 	}

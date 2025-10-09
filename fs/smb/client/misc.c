@@ -169,7 +169,14 @@ tconInfoFree(struct cifs_tcon *tcon, enum smb3_tcon_ref_trace trace)
 		return;
 	}
 	trace_smb3_tcon_ref(tcon->debug_id, tcon->tc_count, trace);
-	free_cached_dirs(tcon->cfids);
+
+	if (tcon->cfids) {
+		invalidate_all_cached_dirs(tcon->cfids);
+		cancel_delayed_work_sync(&tcon->cfids->laundromat_work);
+		kfree(tcon->cfids);
+		tcon->cfids = NULL;
+	}
+
 	atomic_dec(&tconInfoAllocCount);
 	kfree(tcon->nativeFileSystem);
 	kfree_sensitive(tcon->password);

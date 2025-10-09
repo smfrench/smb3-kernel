@@ -140,7 +140,7 @@ static void cifs_drop_all_dir_caches(void)
 			if (cifs_ses_exiting(ses))
 				continue;
 			list_for_each_entry(tcon, &ses->tcon_list, tcon_list)
-				invalidate_all_cached_dirs(tcon);
+				invalidate_all_cached_dirs(tcon->cfids);
 		}
 	}
 	spin_unlock(&cifs_tcp_ses_lock);
@@ -379,7 +379,7 @@ cifs_statfs(struct dentry *dentry, struct kstatfs *buf)
 	buf->f_ffree = 0;	/* unlimited */
 
 	if (server->ops->queryfs)
-		rc = server->ops->queryfs(xid, tcon, full_path, cifs_sb, buf);
+		rc = server->ops->queryfs(xid, tcon, full_path, cifs_sb, buf, d_is_dir(dentry));
 
 statfs_out:
 	free_dentry_path(page);

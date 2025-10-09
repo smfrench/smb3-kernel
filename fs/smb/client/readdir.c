@@ -344,7 +344,7 @@ cifs_std_info_to_fattr(struct cifs_fattr *fattr, FIND_FILE_STANDARD_INFO *info,
 
 static int
 _initiate_cifs_search(const unsigned int xid, struct file *file,
-		     const char *full_path)
+		     const char *full_path, struct cached_fid *cfid)
 {
 	__u16 search_flags;
 	int rc = 0;
@@ -374,7 +374,6 @@ _initiate_cifs_search(const unsigned int xid, struct file *file,
 	}
 
 	server = tcon->ses->server;
-
 	if (!server->ops->query_dir_first) {
 		rc = -ENOSYS;
 		goto error_exit;
@@ -382,6 +381,13 @@ _initiate_cifs_search(const unsigned int xid, struct file *file,
 
 	cifsFile->invalidHandle = true;
 	cifsFile->srch_inf.endOfSearch = false;
+	if (cfid) {
+		cifsFile->srch_inf.restart_scan = true;
+		cifsFile->srch_inf.entries_in_buffer = 0;
+		cifsFile->srch_inf.index_of_last_entry = 2;
+		cifsFile->fid.persistent_fid = cfid->fid.persistent_fid;
+		cifsFile->fid.volatile_fid = cfid->fid.volatile_fid;
+	}
 
 	cifs_dbg(FYI, "Full path: %s start at: %lld\n", full_path, file->f_pos);
 
@@ -406,12 +412,16 @@ ffirst_retry:
 	if (backup_cred(cifs_sb))
 		search_flags |= CIFS_SEARCH_BACKUP_SEARCH;
 
-	rc = server->ops->query_dir_first(xid, tcon, full_path, cifs_sb,
-					  &cifsFile->fid, search_flags,
-					  &cifsFile->srch_inf);
-
+	if (cfid)
+		rc = server->ops->query_dir_next(xid, tcon, &cifsFile->fid, 0, &cifsFile->srch_inf);
+	else
+		rc = server->ops->query_dir_first(xid, tcon, full_path, cifs_sb, &cifsFile->fid,
+						  search_flags, &cifsFile->srch_inf);
 	if (rc == 0) {
-		cifsFile->invalidHandle = false;
+		if (cfid)
+			cifsFile->srch_inf.restart_scan = false;
+		else
+			cifsFile->invalidHandle = false;
 	} else if ((rc == -EOPNOTSUPP) &&
 		   (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_SERVER_INUM)) {
 		cifs_autodisable_serverino(cifs_sb);
@@ -424,12 +434,12 @@ error_exit:
 
 static int
 initiate_cifs_search(const unsigned int xid, struct file *file,
-		     const char *full_path)
+		     const char *full_path, struct cached_fid *cfid)
 {
 	int rc, retry_count = 0;
 
 	do {
-		rc = _initiate_cifs_search(xid, file, full_path);
+		rc = _initiate_cifs_search(xid, file, full_path, cfid);
 		/*
 		 * If we don't have enough credits to start reading the
 		 * directory just try again after short wait.
@@ -683,7 +693,7 @@ static int cifs_save_resume_key(const char *current_entry,
 static int
 find_cifs_entry(const unsigned int xid, struct cifs_tcon *tcon, loff_t pos,
 		struct file *file, const char *full_path,
-		char **current_entry, int *num_to_ret)
+		char **current_entry, int *num_to_ret, struct cached_fid *cfid)
 {
 	__u16 search_flags;
 	int rc = 0;
@@ -739,7 +749,7 @@ find_cifs_entry(const unsigned int xid, struct cifs_tcon *tcon, loff_t pos,
 			cfile->srch_inf.srch_entries_start = NULL;
 			cfile->srch_inf.last_entry = NULL;
 		}
-		rc = initiate_cifs_search(xid, file, full_path);
+		rc = initiate_cifs_search(xid, file, full_path, cfid);
 		if (rc) {
 			cifs_dbg(FYI, "error %d reinitiating a search on rewind\n",
 				 rc);
@@ -840,9 +850,7 @@ static bool emit_cached_dirents(struct cached_dirents *cde,
 		 * initial scan.
 		 */
 		ctx->pos = dirent->pos;
-		rc = dir_emit(ctx, dirent->name, dirent->namelen,
-			      dirent->fattr.cf_uniqueid,
-			      dirent->fattr.cf_dtype);
+		rc = dir_emit(ctx, dirent->name, dirent->namelen, dirent->unique_id, dirent->dtype);
 		if (!rc)
 			return rc;
 		ctx->pos++;
@@ -850,22 +858,16 @@ static bool emit_cached_dirents(struct cached_dirents *cde,
 	return true;
 }
 
-static void update_cached_dirents_count(struct cached_dirents *cde,
-					struct file *file)
+static void update_cached_dirents_count(struct cached_dirents *cde)
 {
-	if (cde->file != file)
-		return;
 	if (cde->is_valid || cde->is_failed)
 		return;
 
 	cde->pos++;
 }
 
-static void finished_cached_dirents_count(struct cached_dirents *cde,
-					struct dir_context *ctx, struct file *file)
+static void finished_cached_dirents_count(struct cached_dirents *cde, struct dir_context *ctx)
 {
-	if (cde->file != file)
-		return;
 	if (cde->is_valid || cde->is_failed)
 		return;
 	if (ctx->pos != cde->pos)
@@ -901,9 +903,10 @@ static bool add_cached_dirent(struct cached_dirents *cde,
 		cde->is_failed = 1;
 		return false;
 	}
-	de->pos = ctx->pos;
 
-	memcpy(&de->fattr, fattr, sizeof(struct cifs_fattr));
+	de->pos = ctx->pos;
+	de->unique_id = fattr->cf_uniqueid;
+	de->dtype = fattr->cf_dtype;
 
 	list_add_tail(&de->entry, &cde->entries);
 	/* update accounting */
@@ -919,8 +922,8 @@ static bool cifs_dir_emit(struct dir_context *ctx,
 			  struct file *file)
 {
 	size_t delta_bytes = 0;
-	bool rc, added = false;
 	ino_t ino = cifs_uniqueid_to_ino_t(fattr->cf_uniqueid);
+	bool rc;
 
 	rc = dir_emit(ctx, name, namelen, ino, fattr->cf_dtype);
 	if (!rc)
@@ -931,11 +934,10 @@ static bool cifs_dir_emit(struct dir_context *ctx,
 		delta_bytes = sizeof(struct cached_dirent) + (size_t)namelen + 1;
 
 		mutex_lock(&cfid->dirents.de_mutex);
-		added = add_cached_dirent(&cfid->dirents, ctx, name, namelen,
-					  fattr, file);
+		rc = add_cached_dirent(&cfid->dirents, ctx, name, namelen, fattr, file);
 		mutex_unlock(&cfid->dirents.de_mutex);
 
-		if (added) {
+		if (rc) {
 			/* per-tcon then global for consistency with free path */
 			atomic64_add((long long)delta_bytes, &cfid->cfids->total_dirents_bytes);
 			atomic_long_inc(&cfid->cfids->total_dirents_entries);
@@ -1042,7 +1044,6 @@ static int cifs_filldir(char *find_entry, struct file *file,
 			      &fattr, cfid, file);
 }
 
-
 int cifs_readdir(struct file *file, struct dir_context *ctx)
 {
 	int rc = 0;
@@ -1050,7 +1051,7 @@ int cifs_readdir(struct file *file, struct dir_context *ctx)
 	int i;
 	struct tcon_link *tlink = NULL;
 	struct cifs_tcon *tcon;
-	struct cifsFileInfo *cifsFile;
+	struct cifsFileInfo *cifsFile = NULL;
 	char *current_entry;
 	int num_to_fill = 0;
 	char *tmp_buf = NULL;
@@ -1071,29 +1072,25 @@ int cifs_readdir(struct file *file, struct dir_context *ctx)
 
 	if (file->private_data == NULL) {
 		tlink = cifs_sb_tlink(cifs_sb);
-		if (IS_ERR(tlink))
-			goto cache_not_found;
+		if (IS_ERR(tlink)) {
+			rc = PTR_ERR(tlink);
+			goto rddir2_exit;
+		}
 		tcon = tlink_tcon(tlink);
 	} else {
 		cifsFile = file->private_data;
 		tcon = tlink_tcon(cifsFile->tlink);
 	}
 
-	rc = open_cached_dir(xid, tcon, full_path, cifs_sb, false, &cfid);
+	rc = open_cached_dir(xid, tcon, full_path, cifs_sb, &cfid);
 	cifs_put_tlink(tlink);
-	if (rc)
+retry_cached:
+	if (!cfid || !is_valid_cached_dir(cfid)) {
+		rc = -ENOENT;
 		goto cache_not_found;
+	}
 
 	mutex_lock(&cfid->dirents.de_mutex);
-	/*
-	 * If this was reading from the start of the directory
-	 * we need to initialize scanning and storing the
-	 * directory content.
-	 */
-	if (ctx->pos == 0 && cfid->dirents.file == NULL) {
-		cfid->dirents.file = file;
-		cfid->dirents.pos = 2;
-	}
 	/*
 	 * If we already have the entire directory cached then
 	 * we can just serve the cache.
@@ -1107,25 +1104,46 @@ int cifs_readdir(struct file *file, struct dir_context *ctx)
 		mutex_unlock(&cfid->dirents.de_mutex);
 		goto rddir2_exit;
 	}
+
+	if (cfid->dirents.is_failed) {
+		rc = -ENOENT;
+		mutex_unlock(&cfid->dirents.de_mutex);
+		goto cache_not_found;
+	}
+
+	if (!cfid->dirents.file)
+		cfid->dirents.file = file;
+	else if (cfid->dirents.file != file)
+		rc = -EAGAIN;
 	mutex_unlock(&cfid->dirents.de_mutex);
 
-	/* Drop the cache while calling initiate_cifs_search and
-	 * find_cifs_entry in case there will be reconnects during
-	 * query_directory.
-	 */
-	close_cached_dir(cfid);
-	cfid = NULL;
+	/* someone else is filling up the dirents for this cfid, wait for them to finish */
+	if (rc == -EAGAIN) {
+		rc = 0;
+		goto retry_cached;
+	}
 
- cache_not_found:
+	/* keep our cfid ref, but check if still valid after network calls */
+cache_not_found:
+	if (rc && cfid) {
+		close_cached_dir(cfid);
+		cfid = NULL;
+	}
+
 	/*
 	 * Ensure FindFirst doesn't fail before doing filldir() for '.' and
 	 * '..'. Otherwise we won't be able to notify VFS in case of failure.
 	 */
 	if (file->private_data == NULL) {
-		rc = initiate_cifs_search(xid, file, full_path);
+		rc = initiate_cifs_search(xid, file, full_path, cfid);
 		cifs_dbg(FYI, "initiate cifs search rc %d\n", rc);
 		if (rc)
 			goto rddir2_exit;
+
+		if (tcon->status != TID_GOOD || (cfid && !is_valid_cached_dir(cfid))) {
+			rc = -ENOENT;
+			goto rddir2_exit;
+		}
 	}
 
 	if (!dir_emit_dots(file, ctx))
@@ -1142,15 +1160,17 @@ int cifs_readdir(struct file *file, struct dir_context *ctx)
 			rc = 0;
 			goto rddir2_exit;
 		}
-	} /* else {
-		cifsFile->invalidHandle = true;
-		tcon->ses->server->close(xid, tcon, &cifsFile->fid);
-	} */
+	}
 
 	tcon = tlink_tcon(cifsFile->tlink);
 	rc = find_cifs_entry(xid, tcon, ctx->pos, file, full_path,
-			     &current_entry, &num_to_fill);
-	open_cached_dir(xid, tcon, full_path, cifs_sb, false, &cfid);
+			     &current_entry, &num_to_fill, cfid);
+
+	if (tcon->status != TID_GOOD || (cfid && !is_valid_cached_dir(cfid))) {
+		rc = -ENOENT;
+		goto rddir2_exit;
+	}
+
 	if (rc) {
 		cifs_dbg(FYI, "fce error %d\n", rc);
 		goto rddir2_exit;
@@ -1159,7 +1179,7 @@ int cifs_readdir(struct file *file, struct dir_context *ctx)
 	} else {
 		if (cfid) {
 			mutex_lock(&cfid->dirents.de_mutex);
-			finished_cached_dirents_count(&cfid->dirents, ctx, file);
+			finished_cached_dirents_count(&cfid->dirents, ctx);
 			mutex_unlock(&cfid->dirents.de_mutex);
 		}
 		cifs_dbg(FYI, "Could not find entry\n");
@@ -1200,7 +1220,7 @@ int cifs_readdir(struct file *file, struct dir_context *ctx)
 		ctx->pos++;
 		if (cfid) {
 			mutex_lock(&cfid->dirents.de_mutex);
-			update_cached_dirents_count(&cfid->dirents, file);
+			update_cached_dirents_count(&cfid->dirents);
 			mutex_unlock(&cfid->dirents.de_mutex);
 		}
 
@@ -1218,8 +1238,15 @@ int cifs_readdir(struct file *file, struct dir_context *ctx)
 	kfree(tmp_buf);
 
 rddir2_exit:
-	if (cfid)
+	if (cfid) {
+		if (rc || cfid->dirents.is_failed || !cifsFile || cifsFile->srch_inf.endOfSearch)
+			cfid->dirents.file = NULL;
+
+		if (cifsFile)
+			cifsFile->invalidHandle = true;
+
 		close_cached_dir(cfid);
+	}
 	free_dentry_path(page);
 	free_xid(xid);
 	return rc;

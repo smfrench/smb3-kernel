@@ -401,7 +401,7 @@ struct smb_version_operations {
 			       struct cifs_tcon *tcon,
 			       struct cifs_sb_info *cifs_sb,
 			       const char *full_path,
-			       struct cifs_open_info_data *data);
+			       struct cifs_open_info_data *data, bool is_dir);
 	/* query file data from the server */
 	int (*query_file_info)(const unsigned int xid, struct cifs_tcon *tcon,
 			       struct cifsFileInfo *cfile, struct cifs_open_info_data *data);
@@ -519,7 +519,7 @@ struct smb_version_operations {
 			__u16 net_fid, struct cifsInodeInfo *cifs_inode);
 	/* query remote filesystem */
 	int (*queryfs)(const unsigned int, struct cifs_tcon *,
-		       const char *, struct cifs_sb_info *, struct kstatfs *);
+		       const char *, struct cifs_sb_info *, struct kstatfs *, bool);
 	/* send mandatory brlock to the server */
 	int (*mand_lock)(const unsigned int, struct cifsFileInfo *, __u64,
 			 __u64, __u32, int, int, bool);
@@ -1441,6 +1441,7 @@ struct cifs_search_info {
 	bool emptyDir:1;
 	bool unicode:1;
 	bool smallBuf:1; /* so we know which buf_release function to call */
+	bool restart_scan;
 };
 
 #define ACL_NO_MODE	((umode_t)(-1))

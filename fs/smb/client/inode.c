@@ -1283,8 +1283,8 @@ static int cifs_get_fattr(struct cifs_open_info_data *data,
 	 */
 
 	if (!data) {
-		rc = server->ops->query_path_info(xid, tcon, cifs_sb,
-						  full_path, &tmp_data);
+		rc = server->ops->query_path_info(xid, tcon, cifs_sb, full_path, &tmp_data,
+						  (*inode && S_ISDIR((*inode)->i_mode)));
 		data = &tmp_data;
 	}
 
@@ -1470,7 +1470,7 @@ static int smb311_posix_get_fattr(struct cifs_open_info_data *data,
 	 */
 	if (!data) {
 		rc = server->ops->query_path_info(xid, tcon, cifs_sb,
-						  full_path, &tmp_data);
+						  full_path, &tmp_data, false);
 		data = &tmp_data;
 	}
 
@@ -2629,7 +2629,7 @@ unlink_target:
 			 * ->i_nlink and then mark it as delete pending.
 			 */
 			if (S_ISDIR(inode->i_mode)) {
-				drop_cached_dir_by_name(xid, tcon, to_name, cifs_sb);
+				drop_cached_dir(tcon->cfids, to_name, CFID_LOOKUP_PATH);
 				spin_lock(&inode->i_lock);
 				i_size_write(inode, 0);
 				clear_nlink(inode);
@@ -2690,7 +2690,7 @@ cifs_dentry_needs_reval(struct dentry *dentry)
 	struct cifsInodeInfo *cifs_i = CIFS_I(inode);
 	struct cifs_sb_info *cifs_sb = CIFS_SB(inode->i_sb);
 	struct cifs_tcon *tcon = cifs_sb_master_tcon(cifs_sb);
-	struct cached_fid *cfid = NULL;
+	struct cached_fid *cfid;
 
 	if (test_bit(CIFS_INO_DELETE_PENDING, &cifs_i->flags))
 		return false;
@@ -2703,13 +2703,30 @@ cifs_dentry_needs_reval(struct dentry *dentry)
 	if (!lookupCacheEnabled)
 		return true;
 
-	if (!open_cached_dir_by_dentry(tcon, dentry->d_parent, &cfid)) {
-		if (cifs_i->time > cfid->time) {
+	if (!IS_ROOT(dentry)) {
+		cfid = find_cached_dir(tcon->cfids, dentry->d_parent, CFID_LOOKUP_DENTRY);
+		if (cfid) {
+			/*
+			 * We hold a lease for the cached parent.
+			 * So as long as this child is within cached dir lifetime, we don't need to
+			 * revalidate it.
+			 *
+			 * Since cfid expiration is based on access time, use it for comparison
+			 * instead of creation time.
+			 */
+			if (time_after(cifs_i->time, cfid->atime - dir_cache_timeout * HZ)) {
+				close_cached_dir(cfid);
+				return true;
+			}
+
+			/*
+			 * From cached dir perspective, we're done -- attr caching (ac*max) may
+			 * have different requirements, so let the checks go through.
+			 */
 			close_cached_dir(cfid);
-			return false;
 		}
-		close_cached_dir(cfid);
 	}
+
 	/*
 	 * depending on inode type, check if attribute caching disabled for
 	 * files or directories

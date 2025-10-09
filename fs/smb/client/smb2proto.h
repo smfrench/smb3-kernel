@@ -72,7 +72,7 @@ int smb2_query_path_info(const unsigned int xid,
 			 struct cifs_tcon *tcon,
 			 struct cifs_sb_info *cifs_sb,
 			 const char *full_path,
-			 struct cifs_open_info_data *data);
+			 struct cifs_open_info_data *data, bool is_dir);
 extern int smb2_set_path_size(const unsigned int xid, struct cifs_tcon *tcon,
 			      const char *full_path, __u64 size,
 			      struct cifs_sb_info *cifs_sb, bool set_alloc,
@@ -231,7 +231,7 @@ extern int SMB2_query_directory_init(unsigned int xid, struct cifs_tcon *tcon,
 				     struct TCP_Server_Info *server,
 				     struct smb_rqst *rqst,
 				     u64 persistent_fid, u64 volatile_fid,
-				     int index, int info_level);
+				     int index, struct cifs_search_info *search);
 extern void SMB2_query_directory_free(struct smb_rqst *rqst);
 extern int SMB2_set_eof(const unsigned int xid, struct cifs_tcon *tcon,
 			u64 persistent_fid, u64 volatile_fid, u32 pid,
@@ -299,12 +299,6 @@ extern int smb311_crypto_shash_allocate(struct TCP_Server_Info *server);
 extern int smb311_update_preauth_hash(struct cifs_ses *ses,
 				      struct TCP_Server_Info *server,
 				      struct kvec *iov, int nvec);
-extern int smb2_query_info_compound(const unsigned int xid,
-				    struct cifs_tcon *tcon,
-				    const char *path, u32 desired_access,
-				    u32 class, u32 type, u32 output_len,
-				    struct kvec *rsp, int *buftype,
-				    struct cifs_sb_info *cifs_sb);
 /* query path info from the server using SMB311 POSIX extensions*/
 int smb311_posix_query_path_info(const unsigned int xid,
 				 struct cifs_tcon *tcon,

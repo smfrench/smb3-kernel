@@ -940,10 +940,9 @@ int smb2_query_path_info(const unsigned int xid,
 			 struct cifs_tcon *tcon,
 			 struct cifs_sb_info *cifs_sb,
 			 const char *full_path,
-			 struct cifs_open_info_data *data)
+			 struct cifs_open_info_data *data, bool is_dir)
 {
 	struct kvec in_iov[3], out_iov[5] = {};
-	struct cached_fid *cfid = NULL;
 	struct cifs_open_parms oparms;
 	struct cifsFileInfo *cfile;
 	__u32 create_options = 0;
@@ -964,22 +963,28 @@ int smb2_query_path_info(const unsigned int xid,
 	 * is fast enough (always using the compounded version).
 	 */
 	if (!tcon->posix_extensions) {
-		if (*full_path) {
-			rc = -ENOENT;
-		} else {
-			rc = open_cached_dir(xid, tcon, full_path,
-					     cifs_sb, false, &cfid);
-		}
-		/* If it is a root and its handle is cached then use it */
-		if (!rc) {
-			if (cfid->file_all_info_is_valid) {
-				memcpy(&data->fi, &cfid->file_all_info,
-				       sizeof(data->fi));
+		struct cached_fid *cfid = NULL;
+
+		rc = -ENOENT;
+		if (!*full_path)
+			rc = open_cached_dir(xid, tcon, full_path, cifs_sb, &cfid);
+		else if (is_dir)
+			cfid = find_cached_dir(tcon->cfids, full_path, CFID_LOOKUP_PATH);
+
+		if (cfid) {
+			rc = 0;
+
+			if (cfid->file_all_info) {
+				memcpy(&data->fi, cfid->file_all_info, sizeof(data->fi));
 			} else {
-				rc = SMB2_query_info(xid, tcon,
-						     cfid->fid.persistent_fid,
-						     cfid->fid.volatile_fid,
-						     &data->fi);
+				rc = SMB2_query_info(xid, tcon, cfid->fid.persistent_fid,
+						     cfid->fid.volatile_fid, &data->fi);
+				if (!rc) {
+					cfid->file_all_info = kmemdup(&data->fi, sizeof(data->fi),
+								      GFP_KERNEL);
+					if (!cfid->file_all_info)
+						rc = -ENOMEM;
+				}
 			}
 			close_cached_dir(cfid);
 			return rc;
@@ -1119,6 +1124,8 @@ smb2_mkdir(const unsigned int xid, struct inode *parent_inode, umode_t mode,
 {
 	struct cifs_open_parms oparms;
 
+	invalidate_cached_dirents(tcon->cfids, name, CFID_LOOKUP_PARENT);
+
 	oparms = CIFS_OPARMS(cifs_sb, tcon, name, FILE_WRITE_ATTRIBUTES,
 			     FILE_CREATE, CREATE_NOT_FILE, mode);
 	return smb2_compound_op(xid, tcon, cifs_sb,
@@ -1139,6 +1146,8 @@ smb2_mkdir_setinfo(struct inode *inode, const char *name,
 	struct kvec in_iov;
 	u32 dosattrs;
 	int tmprc;
+
+	invalidate_cached_dirents(tcon->cfids, name, CFID_LOOKUP_PARENT);
 
 	in_iov.iov_base = &data;
 	in_iov.iov_len = sizeof(data);
@@ -1162,7 +1171,7 @@ smb2_rmdir(const unsigned int xid, struct cifs_tcon *tcon, const char *name,
 {
 	struct cifs_open_parms oparms;
 
-	drop_cached_dir_by_name(xid, tcon, name, cifs_sb);
+	drop_cached_dir(tcon->cfids, name, CFID_LOOKUP_PATH);
 	oparms = CIFS_OPARMS(cifs_sb, tcon, name, DELETE,
 			     FILE_OPEN, CREATE_NOT_FILE, ACL_NO_MODE);
 	return smb2_compound_op(xid, tcon, cifs_sb,
@@ -1194,6 +1203,13 @@ smb2_unlink(const unsigned int xid, struct cifs_tcon *tcon, const char *name,
 	utf16_path = cifs_convert_path_to_utf16(name, cifs_sb);
 	if (!utf16_path)
 		return -ENOMEM;
+
+	if (dentry) {
+		inode = d_inode(dentry);
+		invalidate_cached_dirents(tcon->cfids, dentry->d_parent, CFID_LOOKUP_DENTRY);
+	} else {
+		invalidate_cached_dirents(tcon->cfids, name, CFID_LOOKUP_PARENT);
+	}
 
 	if (smb3_encryption_required(tcon))
 		flags |= CIFS_TRANSFORM_REQ;
@@ -1317,7 +1333,7 @@ int smb2_rename_path(const unsigned int xid,
 	struct cifsFileInfo *cfile;
 	__u32 co = file_create_options(source_dentry);
 
-	drop_cached_dir_by_name(xid, tcon, from_name, cifs_sb);
+	drop_cached_dir(tcon->cfids, from_name, CFID_LOOKUP_PATH);
 	cifs_get_writable_path(tcon, from_name, FIND_WR_WITH_DELETE, &cfile);
 
 	int rc = smb2_set_path_attr(xid, tcon, from_name, to_name, cifs_sb,
@@ -1599,7 +1615,8 @@ int smb2_rename_pending_delete(const char *full_path,
 		goto out;
 	}
 
-	drop_cached_dir_by_name(xid, tcon, full_path, cifs_sb);
+	drop_cached_dir(tcon->cfids, full_path, CFID_LOOKUP_PATH);
+
 	oparms = CIFS_OPARMS(cifs_sb, tcon, full_path,
 			     DELETE | FILE_WRITE_ATTRIBUTES,
 			     FILE_OPEN, co, ACL_NO_MODE);

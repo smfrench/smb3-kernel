@@ -190,9 +190,7 @@ static int cifs_do_create(struct inode *inode, struct dentry *direntry, unsigned
 	int disposition;
 	struct TCP_Server_Info *server = tcon->ses->server;
 	struct cifs_open_parms oparms;
-	struct cached_fid *parent_cfid = NULL;
 	int rdwr_for_fscache = 0;
-	__le32 lease_flags = 0;
 
 	*oplock = 0;
 	if (tcon->ses->server->oplocks)
@@ -314,28 +312,8 @@ static int cifs_do_create(struct inode *inode, struct dentry *direntry, unsigned
 	if (!tcon->unix_ext && (mode & S_IWUGO) == 0)
 		create_options |= CREATE_OPTION_READONLY;
 
-
 retry_open:
-	if (tcon->cfids && direntry->d_parent && server->dialect >= SMB30_PROT_ID) {
-		parent_cfid = NULL;
-		spin_lock(&tcon->cfids->cfid_list_lock);
-		list_for_each_entry(parent_cfid, &tcon->cfids->entries, entry) {
-			if (parent_cfid->dentry == direntry->d_parent) {
-				cifs_dbg(FYI, "found a parent cached file handle\n");
-				if (is_valid_cached_dir(parent_cfid)) {
-					lease_flags
-						|= SMB2_LEASE_FLAG_PARENT_LEASE_KEY_SET_LE;
-					memcpy(fid->parent_lease_key,
-					       parent_cfid->fid.lease_key,
-					       SMB2_LEASE_KEY_SIZE);
-					parent_cfid->dirents.is_valid = false;
-					parent_cfid->dirents.is_failed = true;
-				}
-				break;
-			}
-		}
-		spin_unlock(&tcon->cfids->cfid_list_lock);
-	}
+	invalidate_cached_dirents(tcon->cfids, direntry->d_parent, CFID_LOOKUP_DENTRY);
 
 	oparms = (struct cifs_open_parms) {
 		.tcon = tcon,
@@ -345,7 +323,6 @@ retry_open:
 		.disposition = disposition,
 		.path = full_path,
 		.fid = fid,
-		.lease_flags = lease_flags,
 		.mode = mode,
 	};
 	rc = server->ops->open(xid, &oparms, oplock, buf);
@@ -678,7 +655,6 @@ cifs_lookup(struct inode *parent_dir_inode, struct dentry *direntry,
 	const char *full_path;
 	void *page;
 	int retry_count = 0;
-	struct cached_fid *cfid = NULL;
 
 	xid = get_xid();
 
@@ -729,16 +705,24 @@ cifs_lookup(struct inode *parent_dir_inode, struct dentry *direntry,
 		 * correct action even if case insensitive is not forced on
 		 * mount.
 		 */
-		if (pTcon->nocase && !open_cached_dir_by_dentry(pTcon, direntry->d_parent, &cfid)) {
+		if (pTcon->nocase) {
+			struct cached_fid *cfid = find_cached_dir(pTcon->cfids, direntry->d_parent,
+								  CFID_LOOKUP_DENTRY);
+
 			/*
-			 * dentry is negative and parent is fully cached:
-			 * we can assume file does not exist
+			 * dentry is negative and parent is fully cached, we can assume file does
+			 * not exist
+			 *
+			 * reuse rc here
 			 */
-			if (cfid->dirents.is_valid) {
+			rc = 0;
+			if (cfid) {
+				rc = cfid->dirents.is_valid;
 				close_cached_dir(cfid);
-				goto out;
 			}
-			close_cached_dir(cfid);
+
+			if (rc)
+				goto out;
 		}
 	}
 	cifs_dbg(FYI, "Full path: %s inode = 0x%p\n",
@@ -786,7 +770,6 @@ cifs_d_revalidate(struct inode *dir, const struct qstr *name,
 		  struct dentry *direntry, unsigned int flags)
 {
 	struct inode *inode = NULL;
-	struct cached_fid *cfid;
 	int rc;
 
 	if (flags & LOOKUP_RCU)
@@ -836,17 +819,20 @@ cifs_d_revalidate(struct inode *dir, const struct qstr *name,
 	} else {
 		struct cifs_sb_info *cifs_sb = CIFS_SB(dir->i_sb);
 		struct cifs_tcon *tcon = cifs_sb_master_tcon(cifs_sb);
+		struct cached_fid *cfid = find_cached_dir(tcon->cfids, direntry->d_parent,
+							  CFID_LOOKUP_DENTRY);
 
-		if (!open_cached_dir_by_dentry(tcon, direntry->d_parent, &cfid)) {
+		if (cfid) {
 			/*
-			 * dentry is negative and parent is fully cached:
-			 * we can assume file does not exist
+			 * dentry is negative and parent is fully cached, we can assume file does
+			 * not exist
+			 *
+			 * reuse rc here
 			 */
-			if (cfid->dirents.is_valid) {
-				close_cached_dir(cfid);
-				return 1;
-			}
+			rc = cfid->dirents.is_valid;
 			close_cached_dir(cfid);
+			if (rc)
+				return 1;
 		}
 	}
 
