@@ -730,32 +730,6 @@ dma_mapping_failed:
 	return rc;
 }
 
-/*
- * Check if we need to send a KEEP_ALIVE message
- * The idle connection timer triggers a KEEP_ALIVE message when expires
- * SMBDIRECT_FLAG_RESPONSE_REQUESTED is set in the message flag to have peer send
- * back a response.
- * return value:
- * 1 if SMBDIRECT_FLAG_RESPONSE_REQUESTED needs to be set
- * 0: otherwise
- */
-static int manage_keep_alive_before_sending(struct smbdirect_socket *sc)
-{
-	struct smbdirect_socket_parameters *sp = &sc->parameters;
-
-	if (sc->idle.keepalive == SMBDIRECT_KEEPALIVE_PENDING) {
-		sc->idle.keepalive = SMBDIRECT_KEEPALIVE_SENT;
-		/*
-		 * Now use the keepalive timeout (instead of keepalive interval)
-		 * in order to wait for a response
-		 */
-		mod_delayed_work(sc->workqueue, &sc->idle.timer_work,
-				 msecs_to_jiffies(sp->keepalive_timeout_msec));
-		return 1;
-	}
-	return 0;
-}
-
 /* Post the send request */
 static int smbd_post_send(struct smbdirect_socket *sc,
 		struct smbdirect_send_io *request)
@@ -898,7 +872,7 @@ wait_credit:
 	packet->credits_granted = cpu_to_le16(new_credits);
 
 	packet->flags = 0;
-	if (manage_keep_alive_before_sending(sc))
+	if (smbdirect_connection_request_keep_alive(sc))
 		packet->flags |= cpu_to_le16(SMBDIRECT_FLAG_RESPONSE_REQUESTED);
 
 	packet->reserved = 0;
