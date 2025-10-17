@@ -1105,6 +1105,26 @@ static int smbdirect_connection_wait_for_credits(struct smbdirect_socket *sc,
 }
 
 __maybe_unused /* this is temporary while this file is included in orders */
+static u16 smbdirect_connection_grant_recv_credits(struct smbdirect_socket *sc)
+{
+	u16 new_credits;
+
+	if (atomic_read(&sc->recv_io.credits.count) >= sc->recv_io.credits.target)
+		return 0;
+
+	new_credits = atomic_read(&sc->recv_io.posted.count);
+	if (new_credits == 0)
+		return 0;
+
+	new_credits -= atomic_read(&sc->recv_io.credits.count);
+	if (new_credits <= 0)
+		return 0;
+
+	atomic_add(new_credits, &sc->recv_io.credits.count);
+	return new_credits;
+}
+
+__maybe_unused /* this is temporary while this file is included in orders */
 static void smbdirect_connection_send_io_done(struct ib_cq *cq, struct ib_wc *wc)
 {
 	struct smbdirect_send_io *msg =
