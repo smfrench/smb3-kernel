@@ -18,3 +18,4 @@
 #include "smbdirect_connection.c"
 #include "smbdirect_mr.c"
 #include "smbdirect_rw.c"
+#include "smbdirect_debug.c"
