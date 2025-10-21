@@ -951,6 +951,14 @@ static void smbdirect_connection_disconnect_work(struct work_struct *work)
 }
 
 __maybe_unused /* this is temporary while this file is included in orders */
+static bool smbdirect_connection_is_connected(struct smbdirect_socket *sc)
+{
+	if (unlikely(!sc || sc->first_error || sc->status != SMBDIRECT_SOCKET_CONNECTED))
+		return false;
+	return true;
+}
+
+__maybe_unused /* this is temporary while this file is included in orders */
 static int smbdirect_connection_wait_for_connected(struct smbdirect_socket *sc)
 {
 	struct smbdirect_socket_parameters *sp = &sc->parameters;
