@@ -1167,6 +1167,12 @@ static void smbdirect_connection_destroy_sync(struct smbdirect_socket *sc)
 		SMBDIRECT_DEBUG_ERR_PTR(sc->first_error));
 }
 
+__maybe_unused /* this is temporary while this file is included in orders */
+static void smbdirect_socket_shutdown(struct smbdirect_socket *sc)
+{
+	smbdirect_connection_schedule_disconnect(sc, -ECONNABORTED);
+}
+
 static void smbdirect_connection_idle_timer_work(struct work_struct *work)
 {
 	struct smbdirect_socket *sc =
