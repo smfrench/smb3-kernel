@@ -19,14 +19,9 @@ struct smbdirect_map_sges {
 static ssize_t smbdirect_map_sges_from_iter(struct iov_iter *iter, size_t len,
 					    struct smbdirect_map_sges *state);
 
-static void smbdirect_connection_schedule_disconnect(struct smbdirect_socket *sc,
-						     int error);
 static void smbdirect_connection_disconnect_work(struct work_struct *work);
-static void smbdirect_connection_idle_timer_work(struct work_struct *work);
 static void smbdirect_connection_recv_io_refill_work(struct work_struct *work);
 static void smbdirect_connection_send_immediate_work(struct work_struct *work);
-
-static void smbdirect_connection_destroy_mr_list(struct smbdirect_socket *sc);
 
 __SMBDIRECT_PUBLIC__
 bool smbdirect_frwr_is_supported(const struct ib_device_attr *attrs)
@@ -95,7 +90,8 @@ static int smbdirect_socket_rdma_event_handler(struct rdma_cm_id *id,
 	return 1;
 }
 
-static int smbdirect_socket_init_new(struct net *net, struct smbdirect_socket *sc)
+__SMBDIRECT_PRIVATE__
+int smbdirect_socket_init_new(struct net *net, struct smbdirect_socket *sc)
 {
 	struct rdma_cm_id *id;
 
@@ -407,8 +403,8 @@ static int smbdirect_connection_rdma_event_handler(struct rdma_cm_id *id,
 	return 0;
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static void smbdirect_connection_rdma_established(struct smbdirect_socket *sc)
+__SMBDIRECT_PRIVATE__
+void smbdirect_connection_rdma_established(struct smbdirect_socket *sc)
 {
 	smbdirect_log_rdma_event(sc, SMBDIRECT_LOG_INFO,
 		"rdma established: device: %.*s local: %pISpsfc remote: %pISpsfc\n",
@@ -421,8 +417,8 @@ static void smbdirect_connection_rdma_established(struct smbdirect_socket *sc)
 	sc->rdma.expected_event = RDMA_CM_EVENT_DISCONNECTED;
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static void smbdirect_connection_negotiation_done(struct smbdirect_socket *sc)
+__SMBDIRECT_PRIVATE__
+void smbdirect_connection_negotiation_done(struct smbdirect_socket *sc)
 {
 	if (unlikely(sc->first_error))
 		return;
@@ -497,10 +493,8 @@ static u32 smbdirect_rdma_rw_send_wrs(struct ib_device *dev,
 	return factor * attr->cap.max_rdma_ctxs;
 }
 
-static void smbdirect_connection_destroy_qp(struct smbdirect_socket *sc);
-
-__maybe_unused /* this is temporary while this file is included in orders */
-static int smbdirect_connection_create_qp(struct smbdirect_socket *sc)
+__SMBDIRECT_PRIVATE__
+int smbdirect_connection_create_qp(struct smbdirect_socket *sc)
 {
 	struct smbdirect_socket_parameters *sp = &sc->parameters;
 	struct ib_qp_init_attr qp_attr;
@@ -657,7 +651,8 @@ err:
 	return ret;
 }
 
-static void smbdirect_connection_destroy_qp(struct smbdirect_socket *sc)
+__SMBDIRECT_PRIVATE__
+void smbdirect_connection_destroy_qp(struct smbdirect_socket *sc)
 {
 	if (sc->ib.qp) {
 		ib_drain_qp(sc->ib.qp);
@@ -678,10 +673,8 @@ static void smbdirect_connection_destroy_qp(struct smbdirect_socket *sc)
 	}
 }
 
-static void smbdirect_connection_destroy_mem_pools(struct smbdirect_socket *sc);
-
-__maybe_unused /* this is temporary while this file is included in orders */
-static int smbdirect_connection_create_mem_pools(struct smbdirect_socket *sc)
+__SMBDIRECT_PRIVATE__
+int smbdirect_connection_create_mem_pools(struct smbdirect_socket *sc)
 {
 	struct smbdirect_socket_parameters *sp = &sc->parameters;
 	char name[80];
@@ -760,7 +753,8 @@ err:
 	return -ENOMEM;
 }
 
-static void smbdirect_connection_destroy_mem_pools(struct smbdirect_socket *sc)
+__SMBDIRECT_PRIVATE__
+void smbdirect_connection_destroy_mem_pools(struct smbdirect_socket *sc)
 {
 	struct smbdirect_recv_io *recv_io, *next_io;
 
@@ -791,8 +785,8 @@ static void smbdirect_connection_destroy_mem_pools(struct smbdirect_socket *sc)
 	sc->send_io.mem.cache = NULL;
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static struct smbdirect_send_io *smbdirect_connection_alloc_send_io(struct smbdirect_socket *sc)
+__SMBDIRECT_PRIVATE__
+struct smbdirect_send_io *smbdirect_connection_alloc_send_io(struct smbdirect_socket *sc)
 {
 	struct smbdirect_send_io *msg;
 
@@ -806,8 +800,8 @@ static struct smbdirect_send_io *smbdirect_connection_alloc_send_io(struct smbdi
 	return msg;
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static void smbdirect_connection_free_send_io(struct smbdirect_send_io *msg)
+__SMBDIRECT_PRIVATE__
+void smbdirect_connection_free_send_io(struct smbdirect_send_io *msg)
 {
 	struct smbdirect_socket *sc = msg->socket;
 	size_t i;
@@ -838,8 +832,8 @@ static void smbdirect_connection_free_send_io(struct smbdirect_send_io *msg)
 	mempool_free(msg, sc->send_io.mem.pool);
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static struct smbdirect_recv_io *smbdirect_connection_get_recv_io(struct smbdirect_socket *sc)
+__SMBDIRECT_PRIVATE__
+struct smbdirect_recv_io *smbdirect_connection_get_recv_io(struct smbdirect_socket *sc)
 {
 	struct smbdirect_recv_io *msg = NULL;
 	unsigned long flags;
@@ -858,8 +852,8 @@ static struct smbdirect_recv_io *smbdirect_connection_get_recv_io(struct smbdire
 	return msg;
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static void smbdirect_connection_put_recv_io(struct smbdirect_recv_io *msg)
+__SMBDIRECT_PRIVATE__
+void smbdirect_connection_put_recv_io(struct smbdirect_recv_io *msg)
 {
 	struct smbdirect_socket *sc = msg->socket;
 	unsigned long flags;
@@ -925,11 +919,11 @@ smbdirect_connection_reassembly_first_recv_io(struct smbdirect_socket *sc)
 	return msg;
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static void smbdirect_connection_negotiate_rdma_resources(struct smbdirect_socket *sc,
-							  u8 peer_initiator_depth,
-							  u8 peer_responder_resources,
-							  const struct rdma_conn_param *param)
+__SMBDIRECT_PRIVATE__
+void smbdirect_connection_negotiate_rdma_resources(struct smbdirect_socket *sc,
+						   u8 peer_initiator_depth,
+						   u8 peer_responder_resources,
+						   const struct rdma_conn_param *param)
 {
 	struct smbdirect_socket_parameters *sp = &sc->parameters;
 
@@ -987,8 +981,9 @@ static void smbdirect_connection_negotiate_rdma_resources(struct smbdirect_socke
 						peer_responder_resources);
 }
 
-static void smbdirect_connection_schedule_disconnect(struct smbdirect_socket *sc,
-						     int error)
+__SMBDIRECT_PRIVATE__
+void smbdirect_connection_schedule_disconnect(struct smbdirect_socket *sc,
+					      int error)
 {
 	struct smbdirect_recv_io *recv_io, *recv_tmp;
 	unsigned long flags;
@@ -1333,8 +1328,8 @@ static void smbdirect_connection_destroy(struct smbdirect_socket *sc)
 		"rdma session destroyed\n");
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static void smbdirect_connection_destroy_sync(struct smbdirect_socket *sc)
+__SMBDIRECT_PRIVATE__
+void smbdirect_connection_destroy_sync(struct smbdirect_socket *sc)
 {
 	smbdirect_log_rdma_event(sc, SMBDIRECT_LOG_INFO,
 		"status=%s first_error=%1pe",
@@ -1424,7 +1419,8 @@ void smbdirect_socket_release(struct smbdirect_socket *sc)
 }
 __SMBDIRECT_EXPORT_SYMBOL__(smbdirect_socket_release);
 
-static void smbdirect_connection_idle_timer_work(struct work_struct *work)
+__SMBDIRECT_PRIVATE__
+void smbdirect_connection_idle_timer_work(struct work_struct *work)
 {
 	struct smbdirect_socket *sc =
 		container_of(work, struct smbdirect_socket, idle.timer_work.work);
@@ -1455,11 +1451,11 @@ static void smbdirect_connection_idle_timer_work(struct work_struct *work)
 	queue_work(sc->workqueue, &sc->idle.immediate_work);
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static int smbdirect_connection_wait_for_credits(struct smbdirect_socket *sc,
-						 wait_queue_head_t *waitq,
-						 atomic_t *total_credits,
-						 int needed)
+__SMBDIRECT_PRIVATE__
+int smbdirect_connection_wait_for_credits(struct smbdirect_socket *sc,
+					  wait_queue_head_t *waitq,
+					  atomic_t *total_credits,
+					  int needed)
 {
 	int ret;
 
@@ -1521,8 +1517,9 @@ static bool smbdirect_connection_request_keep_alive(struct smbdirect_socket *sc)
 	return false;
 }
 
-static int smbdirect_connection_post_send_wr(struct smbdirect_socket *sc,
-					     struct ib_send_wr *wr)
+__SMBDIRECT_PRIVATE__
+int smbdirect_connection_post_send_wr(struct smbdirect_socket *sc,
+				      struct ib_send_wr *wr)
 {
 	int ret;
 
@@ -1992,8 +1989,8 @@ static void smbdirect_connection_send_immediate_work(struct work_struct *work)
 	}
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static int smbdirect_connection_post_recv_io(struct smbdirect_recv_io *msg)
+__SMBDIRECT_PRIVATE__
+int smbdirect_connection_post_recv_io(struct smbdirect_recv_io *msg)
 {
 	struct smbdirect_socket *sc = msg->socket;
 	struct smbdirect_socket_parameters *sp = &sc->parameters;
@@ -2034,8 +2031,8 @@ static int smbdirect_connection_post_recv_io(struct smbdirect_recv_io *msg)
 	return ret;
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static void smbdirect_connection_recv_io_done(struct ib_cq *cq, struct ib_wc *wc)
+__SMBDIRECT_PRIVATE__
+void smbdirect_connection_recv_io_done(struct ib_cq *cq, struct ib_wc *wc)
 {
 	struct smbdirect_recv_io *recv_io =
 		container_of(wc->wr_cqe, struct smbdirect_recv_io, cqe);
@@ -2201,7 +2198,8 @@ error:
 	smbdirect_connection_schedule_disconnect(sc, -ECONNABORTED);
 }
 
-static int smbdirect_connection_recv_io_refill(struct smbdirect_socket *sc)
+__SMBDIRECT_PRIVATE__
+int smbdirect_connection_recv_io_refill(struct smbdirect_socket *sc)
 {
 	int missing;
 	int posted = 0;

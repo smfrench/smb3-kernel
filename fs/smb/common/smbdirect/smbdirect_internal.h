@@ -15,5 +15,6 @@
 #include "smbdirect_pdu.h"
 #include "smbdirect_public.h"
 #include "smbdirect_socket.h"
+#include "smbdirect_private.h"
 
 #endif /* __FS_SMB_COMMON_SMBDIRECT_INTERNAL_H__ */
