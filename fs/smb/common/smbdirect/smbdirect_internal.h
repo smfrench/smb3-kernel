@@ -13,6 +13,7 @@
 #include <linux/errname.h>
 #include "smbdirect.h"
 #include "smbdirect_pdu.h"
+#include "smbdirect_public.h"
 #include "smbdirect_socket.h"
 
 #endif /* __FS_SMB_COMMON_SMBDIRECT_INTERNAL_H__ */

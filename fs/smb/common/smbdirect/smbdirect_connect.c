@@ -15,9 +15,8 @@ static int smbdirect_connect_negotiate_start(struct smbdirect_socket *sc);
 static void smbdirect_connect_negotiate_send_done(struct ib_cq *cq, struct ib_wc *wc);
 static void smbdirect_connect_negotiate_recv_done(struct ib_cq *cq, struct ib_wc *wc);
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static int smbdirect_connect(struct smbdirect_socket *sc,
-			     const struct sockaddr *dst)
+__SMBDIRECT_PUBLIC__
+int smbdirect_connect(struct smbdirect_socket *sc, const struct sockaddr *dst)
 {
 	const struct sockaddr *src = NULL;
 	union {
@@ -61,6 +60,7 @@ static int smbdirect_connect(struct smbdirect_socket *sc,
 	 */
 	return 0;
 }
+__SMBDIRECT_EXPORT_SYMBOL__(smbdirect_connect);
 
 static int smbdirect_connect_setup_connection(struct smbdirect_socket *sc)
 {
@@ -831,9 +831,9 @@ static void smbdirect_connect_negotiate_recv_work(struct work_struct *work)
 	smbdirect_connection_negotiation_done(sc);
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static int smbdirect_connect_sync(struct smbdirect_socket *sc,
-				  const struct sockaddr *dst)
+__SMBDIRECT_PUBLIC__
+int smbdirect_connect_sync(struct smbdirect_socket *sc,
+			   const struct sockaddr *dst)
 {
 	int ret;
 
@@ -855,3 +855,4 @@ static int smbdirect_connect_sync(struct smbdirect_socket *sc,
 
 	return 0;
 }
+__SMBDIRECT_EXPORT_SYMBOL__(smbdirect_connect_sync);

@@ -28,8 +28,8 @@ static void smbdirect_connection_send_immediate_work(struct work_struct *work);
 
 static void smbdirect_connection_destroy_mr_list(struct smbdirect_socket *sc);
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static bool smbdirect_frwr_is_supported(const struct ib_device_attr *attrs)
+__SMBDIRECT_PUBLIC__
+bool smbdirect_frwr_is_supported(const struct ib_device_attr *attrs)
 {
 	/*
 	 * Test if FRWR (Fast Registration Work Requests) is supported on the
@@ -43,6 +43,7 @@ static bool smbdirect_frwr_is_supported(const struct ib_device_attr *attrs)
 		return false;
 	return true;
 }
+__SMBDIRECT_EXPORT_SYMBOL__(smbdirect_frwr_is_supported);
 
 __maybe_unused /* this is temporary while this file is included in orders */
 static void smbdirect_socket_prepare_create(struct smbdirect_socket *sc,
@@ -117,8 +118,8 @@ static int smbdirect_socket_init_new(struct net *net, struct smbdirect_socket *s
 	return 0;
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static int smbdirect_socket_create_kern(struct net *net, struct smbdirect_socket **_sc)
+__SMBDIRECT_PUBLIC__
+int smbdirect_socket_create_kern(struct net *net, struct smbdirect_socket **_sc)
 {
 	struct smbdirect_socket *sc;
 	int ret;
@@ -142,6 +143,7 @@ init_failed:
 alloc_failed:
 	return ret;
 }
+__SMBDIRECT_EXPORT_SYMBOL__(smbdirect_socket_create_kern);
 
 static int smbdirect_socket_init_accepting(struct rdma_cm_id *id, struct smbdirect_socket *sc)
 {
@@ -158,8 +160,8 @@ static int smbdirect_socket_init_accepting(struct rdma_cm_id *id, struct smbdire
 	return 0;
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static int smbdirect_socket_create_accepting(struct rdma_cm_id *id, struct smbdirect_socket **_sc)
+__SMBDIRECT_PUBLIC__
+int smbdirect_socket_create_accepting(struct rdma_cm_id *id, struct smbdirect_socket **_sc)
 {
 	struct smbdirect_socket *sc;
 	int ret;
@@ -183,10 +185,11 @@ init_failed:
 alloc_failed:
 	return ret;
 }
+__SMBDIRECT_EXPORT_SYMBOL__(smbdirect_socket_create_accepting);
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static int smbdirect_socket_set_initial_parameters(struct smbdirect_socket *sc,
-						   const struct smbdirect_socket_parameters *sp)
+__SMBDIRECT_PUBLIC__
+int smbdirect_socket_set_initial_parameters(struct smbdirect_socket *sc,
+					    const struct smbdirect_socket_parameters *sp)
 {
 	/*
 	 * This is only allowed before connect or accept
@@ -208,18 +211,20 @@ static int smbdirect_socket_set_initial_parameters(struct smbdirect_socket *sc,
 
 	return 0;
 }
+__SMBDIRECT_EXPORT_SYMBOL__(smbdirect_socket_set_initial_parameters);
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static const struct smbdirect_socket_parameters *
+__SMBDIRECT_PUBLIC__
+const struct smbdirect_socket_parameters *
 smbdirect_socket_get_current_parameters(struct smbdirect_socket *sc)
 {
 	return &sc->parameters;
 }
+__SMBDIRECT_EXPORT_SYMBOL__(smbdirect_socket_get_current_parameters);
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static int smbdirect_socket_set_kernel_settings(struct smbdirect_socket *sc,
-						enum ib_poll_context poll_ctx,
-						gfp_t gfp_mask)
+__SMBDIRECT_PUBLIC__
+int smbdirect_socket_set_kernel_settings(struct smbdirect_socket *sc,
+					 enum ib_poll_context poll_ctx,
+					 gfp_t gfp_mask)
 {
 	/*
 	 * This is only allowed before connect or accept
@@ -239,10 +244,11 @@ static int smbdirect_socket_set_kernel_settings(struct smbdirect_socket *sc,
 
 	return 0;
 }
+__SMBDIRECT_EXPORT_SYMBOL__(smbdirect_socket_set_kernel_settings);
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static int smbdirect_socket_set_custom_workqueue(struct smbdirect_socket *sc,
-						 struct workqueue_struct *workqueue)
+__SMBDIRECT_PUBLIC__
+int smbdirect_socket_set_custom_workqueue(struct smbdirect_socket *sc,
+					  struct workqueue_struct *workqueue)
 {
 	/*
 	 * This is only allowed before connect or accept
@@ -261,26 +267,28 @@ static int smbdirect_socket_set_custom_workqueue(struct smbdirect_socket *sc,
 
 	return 0;
 }
+__SMBDIRECT_EXPORT_SYMBOL__(smbdirect_socket_set_custom_workqueue);
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static void smbdirect_socket_set_logging(struct smbdirect_socket *sc,
-					 void *private_ptr,
-					 bool (*needed)(struct smbdirect_socket *sc,
-							void *private_ptr,
-							unsigned int lvl,
-							unsigned int cls),
-					 void (*vaprintf)(struct smbdirect_socket *sc,
-							  const char *func,
-							  unsigned int line,
-							  void *private_ptr,
-							  unsigned int lvl,
-							  unsigned int cls,
-							  struct va_format *vaf))
+__SMBDIRECT_PUBLIC__
+void smbdirect_socket_set_logging(struct smbdirect_socket *sc,
+				  void *private_ptr,
+				  bool (*needed)(struct smbdirect_socket *sc,
+						 void *private_ptr,
+						 unsigned int lvl,
+						 unsigned int cls),
+				  void (*vaprintf)(struct smbdirect_socket *sc,
+						   const char *func,
+						   unsigned int line,
+						   void *private_ptr,
+						   unsigned int lvl,
+						   unsigned int cls,
+						   struct va_format *vaf))
 {
 	sc->logging.private_ptr = private_ptr;
 	sc->logging.needed = needed;
 	sc->logging.vaprintf = vaprintf;
 }
+__SMBDIRECT_EXPORT_SYMBOL__(smbdirect_socket_set_logging);
 
 __maybe_unused /* this is temporary while this file is included in orders */
 static void smbdirect_connection_wake_up_all(struct smbdirect_socket *sc)
@@ -1145,16 +1153,17 @@ static void smbdirect_connection_disconnect_work(struct work_struct *work)
 	smbdirect_connection_wake_up_all(sc);
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static bool smbdirect_connection_is_connected(struct smbdirect_socket *sc)
+__SMBDIRECT_PUBLIC__
+bool smbdirect_connection_is_connected(struct smbdirect_socket *sc)
 {
 	if (unlikely(!sc || sc->first_error || sc->status != SMBDIRECT_SOCKET_CONNECTED))
 		return false;
 	return true;
 }
+__SMBDIRECT_EXPORT_SYMBOL__(smbdirect_connection_is_connected);
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static int smbdirect_connection_wait_for_connected(struct smbdirect_socket *sc)
+__SMBDIRECT_PUBLIC__
+int smbdirect_connection_wait_for_connected(struct smbdirect_socket *sc)
 {
 	struct smbdirect_socket_parameters *sp = &sc->parameters;
 	union {
@@ -1220,6 +1229,7 @@ static int smbdirect_connection_wait_for_connected(struct smbdirect_socket *sc)
 
 	return 0;
 }
+__SMBDIRECT_EXPORT_SYMBOL__(smbdirect_connection_wait_for_connected);
 
 static void smbdirect_connection_destroy(struct smbdirect_socket *sc)
 {
@@ -1362,11 +1372,12 @@ static void smbdirect_connection_destroy_sync(struct smbdirect_socket *sc)
 		SMBDIRECT_DEBUG_ERR_PTR(sc->first_error));
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static void smbdirect_socket_shutdown(struct smbdirect_socket *sc)
+__SMBDIRECT_PUBLIC__
+void smbdirect_socket_shutdown(struct smbdirect_socket *sc)
 {
 	smbdirect_connection_schedule_disconnect(sc, -ECONNABORTED);
 }
+__SMBDIRECT_EXPORT_SYMBOL__(smbdirect_socket_shutdown);
 
 __maybe_unused /* this is temporary while this file is included in orders */
 static void smbdirect_socket_release_disconnect(struct kref *kref)
@@ -1394,8 +1405,8 @@ static void smbdirect_socket_release_destroy(struct kref *kref)
 	kfree(sc);
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static void smbdirect_socket_release(struct smbdirect_socket *sc)
+__SMBDIRECT_PUBLIC__
+void smbdirect_socket_release(struct smbdirect_socket *sc)
 {
 	/*
 	 * We expect only 1 disconnect reference
@@ -1411,6 +1422,7 @@ static void smbdirect_socket_release(struct smbdirect_socket *sc)
 	 */
 	kref_put(&sc->refs.destroy, smbdirect_socket_release_destroy);
 }
+__SMBDIRECT_EXPORT_SYMBOL__(smbdirect_socket_release);
 
 static void smbdirect_connection_idle_timer_work(struct work_struct *work)
 {
@@ -1667,11 +1679,12 @@ static int smbdirect_connection_post_send_io(struct smbdirect_socket *sc,
 	return smbdirect_connection_post_send_wr(sc, &msg->wr);
 }
 
-static int smbdirect_connection_send_single_iter(struct smbdirect_socket *sc,
-						 struct smbdirect_send_batch *batch,
-						 struct iov_iter *iter,
-						 unsigned int flags,
-						 u32 remaining_data_length)
+__SMBDIRECT_PUBLIC__
+int smbdirect_connection_send_single_iter(struct smbdirect_socket *sc,
+					  struct smbdirect_send_batch *batch,
+					  struct iov_iter *iter,
+					  unsigned int flags,
+					  u32 remaining_data_length)
 {
 	const struct smbdirect_socket_parameters *sp = &sc->parameters;
 	struct smbdirect_send_io *msg;
@@ -1802,9 +1815,10 @@ credit_failed:
 lcredit_failed:
 	return ret;
 }
+__SMBDIRECT_EXPORT_SYMBOL__(smbdirect_connection_send_single_iter);
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static int smbdirect_connection_send_wait_zero_pending(struct smbdirect_socket *sc)
+__SMBDIRECT_PUBLIC__
+int smbdirect_connection_send_wait_zero_pending(struct smbdirect_socket *sc)
 {
 	/*
 	 * As an optimization, we don't wait for individual I/O to finish
@@ -1827,13 +1841,14 @@ static int smbdirect_connection_send_wait_zero_pending(struct smbdirect_socket *
 
 	return 0;
 }
+__SMBDIRECT_EXPORT_SYMBOL__(smbdirect_connection_send_wait_zero_pending);
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static int smbdirect_connection_send_iter(struct smbdirect_socket *sc,
-					  struct iov_iter *iter,
-					  unsigned int flags,
-					  bool need_invalidate,
-					  unsigned int remote_key)
+__SMBDIRECT_PUBLIC__
+int smbdirect_connection_send_iter(struct smbdirect_socket *sc,
+				   struct iov_iter *iter,
+				   unsigned int flags,
+				   bool need_invalidate,
+				   unsigned int remote_key)
 {
 	struct smbdirect_socket_parameters *sp = &sc->parameters;
 	struct smbdirect_send_batch batch;
@@ -1912,6 +1927,7 @@ static int smbdirect_connection_send_iter(struct smbdirect_socket *sc,
 
 	return total_count;
 }
+__SMBDIRECT_EXPORT_SYMBOL__(smbdirect_connection_send_iter);
 
 static void smbdirect_connection_send_io_done(struct ib_cq *cq, struct ib_wc *wc)
 {
@@ -2290,10 +2306,10 @@ static void smbdirect_connection_recv_io_refill_work(struct work_struct *work)
 	}
 }
 
-__maybe_unused /* this is temporary while this file is included in orders */
-static int smbdirect_connection_recvmsg(struct smbdirect_socket *sc,
-					struct msghdr *msg,
-					unsigned int flags)
+__SMBDIRECT_PUBLIC__
+int smbdirect_connection_recvmsg(struct smbdirect_socket *sc,
+				 struct msghdr *msg,
+				 unsigned int flags)
 {
 	struct smbdirect_recv_io *response;
 	struct smbdirect_data_transfer *data_transfer;
@@ -2440,6 +2456,7 @@ read_rfc1002_done:
 
 	goto again;
 }
+__SMBDIRECT_EXPORT_SYMBOL__(smbdirect_connection_recvmsg);
 
 static bool smbdirect_map_sges_single_page(struct smbdirect_map_sges *state,
 					   struct page *page, size_t off, size_t len)
