@@ -66,6 +66,7 @@ static struct cached_fid *find_or_create_cached_dir(struct cached_fids *cfids,
 	 * zero.
 	 */
 	cfid->has_lease = true;
+	cfid->lease_state = 0;
 
 	return cfid;
 }
@@ -350,6 +351,7 @@ replay_again:
 		spin_unlock(&cfids->cfid_list_lock);
 		goto oshr_free;
 	}
+	cfid->lease_state = oplock;
 	qi_rsp = (struct smb2_query_info_rsp *)rsp_iov[1].iov_base;
 	if (le32_to_cpu(qi_rsp->OutputBufferLength) < sizeof(struct smb2_file_all_info)) {
 		spin_unlock(&cfids->cfid_list_lock);
@@ -388,6 +390,7 @@ out:
 			 * lease. Release one here, and the second below.
 			 */
 			cfid->has_lease = false;
+			cfid->lease_state = 0;
 			kref_put(&cfid->refcount, smb2_close_cached_fid);
 		}
 		spin_unlock(&cfids->cfid_list_lock);
@@ -478,6 +481,7 @@ void drop_cached_dir_by_name(const unsigned int xid, struct cifs_tcon *tcon,
 	spin_lock(&cfid->cfids->cfid_list_lock);
 	if (cfid->has_lease) {
 		cfid->has_lease = false;
+		cfid->lease_state = 0;
 		kref_put(&cfid->refcount, smb2_close_cached_fid);
 	}
 	spin_unlock(&cfid->cfids->cfid_list_lock);
@@ -577,6 +581,7 @@ void invalidate_all_cached_dirs(struct cifs_tcon *tcon)
 			 * so steal that reference.
 			 */
 			cfid->has_lease = false;
+			cfid->lease_state = 0;
 		} else
 			kref_get(&cfid->refcount);
 	}
@@ -632,6 +637,7 @@ bool cached_dir_lease_break(struct cifs_tcon *tcon, __u8 lease_key[16])
 			    cfid->fid.lease_key,
 			    SMB2_LEASE_KEY_SIZE)) {
 			cfid->has_lease = false;
+			cfid->lease_state = 0;
 			cfid->time = 0;
 			/*
 			 * We found a lease remove it from the list
@@ -738,6 +744,7 @@ static void cfids_laundromat_worker(struct work_struct *work)
 				 * server. Steal that reference.
 				 */
 				cfid->has_lease = false;
+				cfid->lease_state = 0;
 			} else
 				kref_get(&cfid->refcount);
 		}
