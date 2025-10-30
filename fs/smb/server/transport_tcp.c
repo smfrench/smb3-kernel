@@ -46,11 +46,6 @@ static struct interface *alloc_iface(char *ifname);
 #define TCP_TRANS(t)	((struct tcp_transport *)container_of(t, \
 				struct tcp_transport, transport))
 
-static inline void ksmbd_tcp_nodelay(struct socket *sock)
-{
-	tcp_sock_set_nodelay(sock->sk);
-}
-
 static inline void ksmbd_tcp_reuseaddr(struct socket *sock)
 {
 	sock_set_reuseaddr(sock->sk);
@@ -241,15 +236,10 @@ static int ksmbd_kthread_fn(void *p)
 			mutex_unlock(&iface->sock_release_lock);
 			break;
 		}
-		ret = kernel_accept(iface->ksmbd_socket, &client_sk,
-				    SOCK_NONBLOCK);
+		ret = kernel_accept(iface->ksmbd_socket, &client_sk, 0);
 		mutex_unlock(&iface->sock_release_lock);
-		if (ret) {
-			if (ret == -EAGAIN)
-				/* check for new connections every 100 msecs */
-				schedule_timeout_interruptible(HZ / 10);
+		if (ret)
 			continue;
-		}
 
 		if (!server_conf.max_ip_connections)
 			goto skip_max_ip_conns_limit;
@@ -455,10 +445,6 @@ static void tcp_destroy_socket(struct socket *ksmbd_socket)
 	if (!ksmbd_socket)
 		return;
 
-	/* set zero to timeout */
-	ksmbd_tcp_rcv_timeout(ksmbd_socket, 0);
-	ksmbd_tcp_snd_timeout(ksmbd_socket, 0);
-
 	ret = kernel_sock_shutdown(ksmbd_socket, SHUT_RDWR);
 	if (ret)
 		pr_err("Failed to shutdown socket: %d\n", ret);
@@ -505,7 +491,6 @@ static int create_socket(struct interface *iface)
 		release_sock(ksmbd_socket->sk);
 	}
 
-	ksmbd_tcp_nodelay(ksmbd_socket);
 	ksmbd_tcp_reuseaddr(ksmbd_socket);
 
 	ret = sock_setsockopt(ksmbd_socket,
@@ -528,9 +513,6 @@ static int create_socket(struct interface *iface)
 		pr_err("Failed to bind socket: %d\n", ret);
 		goto out_error;
 	}
-
-	ksmbd_socket->sk->sk_rcvtimeo = KSMBD_TCP_RECV_TIMEOUT;
-	ksmbd_socket->sk->sk_sndtimeo = KSMBD_TCP_SEND_TIMEOUT;
 
 	ret = kernel_listen(ksmbd_socket, KSMBD_SOCKET_BACKLOG);
 	if (ret) {
