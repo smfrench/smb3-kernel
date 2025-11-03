@@ -2069,6 +2069,8 @@ static int smb_direct_create_pools(struct smbdirect_socket *sc)
 			goto err;
 		recvmsg->socket = sc;
 		recvmsg->sge.length = 0;
+		INIT_WORK(&recvmsg->complex_work, __smbdirect_socket_disabled_work);
+		disable_work_sync(&recvmsg->complex_work);
 		list_add(&recvmsg->list, &sc->recv_io.free.list);
 	}
 
