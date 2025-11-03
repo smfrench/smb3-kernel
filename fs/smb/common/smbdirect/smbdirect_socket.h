@@ -572,6 +572,14 @@ struct smbdirect_recv_io {
 #define SMBDIRECT_RECV_IO_MAX_SGE 1
 	struct ib_sge sge;
 
+	/*
+	 * We may need to handle complex
+	 * work that might sleep and are
+	 * not allowed to run in an interrupt
+	 * context.
+	 */
+	struct work_struct complex_work;
+
 	/* Link to free or reassembly list */
 	struct list_head list;
 
