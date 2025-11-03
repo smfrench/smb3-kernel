@@ -1536,6 +1536,8 @@ static int allocate_receive_buffers(struct smbdirect_socket *sc, int num_buf)
 
 		response->socket = sc;
 		response->sge.length = 0;
+		INIT_WORK(&response->complex_work, __smbdirect_socket_disabled_work);
+		disable_work_sync(&response->complex_work);
 		list_add_tail(&response->list, &sc->recv_io.free.list);
 	}
 
