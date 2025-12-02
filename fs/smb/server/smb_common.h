@@ -11,6 +11,7 @@
 #include "glob.h"
 #include "nterr.h"
 #include "../common/smbglob.h"
+#include "../common/smb1pdu.h"
 #include "../common/smb2pdu.h"
 #include "../common/fscc.h"
 #include "smb2pdu.h"
