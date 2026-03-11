@@ -1890,6 +1890,7 @@ enum cifs_writable_file_flags {
 	FIND_WR_FSUID_ONLY		= (1U << 0),
 	FIND_WR_WITH_DELETE		= (1U << 1),
 	FIND_WR_NO_PENDING_DELETE	= (1U << 2),
+	FIND_WR_OPEN_FLAGS		= (1U << 3),
 };
 
 #define   MID_FREE 0
