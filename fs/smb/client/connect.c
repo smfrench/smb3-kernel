@@ -1955,6 +1955,11 @@ static int match_session(struct cifs_ses *ses,
 	case Kerberos:
 		if (!uid_eq(ctx->cred_uid, ses->cred_uid))
 			return 0;
+		if (ctx->username &&
+		    (!ses->user_name ||
+		     strncmp(ses->user_name, ctx->username,
+			     CIFS_MAX_USERNAME_LEN)))
+			return 0;
 		break;
 	case NTLMv2:
 	case RawNTLMSSP:
