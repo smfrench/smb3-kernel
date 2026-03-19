@@ -2386,4 +2386,10 @@ static inline int cifs_open_create_options(unsigned int oflags, int opts)
 	return opts;
 }
 
+/*
+ * The number of blocks is not related to (i_size / i_blksize), but instead
+ * 512 byte (2**9) size is required for calculating num blocks.
+ */
+#define CIFS_INO_BLOCKS(size) ((512 - 1 + (size)) >> 9)
+
 #endif	/* _CIFS_GLOB_H */
