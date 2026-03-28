@@ -715,6 +715,8 @@ struct cifsFileInfo *cifs_new_fileinfo(struct cifs_fid *fid, struct file *file,
 
 	cifs_down_write(&cinode->lock_sem);
 	list_add(&fdlocks->llist, &cinode->llist);
+	if (file->f_flags & O_TMPFILE)
+		set_bit(CIFS_INO_TMPFILE, &cinode->flags);
 	up_write(&cinode->lock_sem);
 
 	spin_lock(&tcon->open_file_lock);

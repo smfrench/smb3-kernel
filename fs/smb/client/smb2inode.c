@@ -513,15 +513,28 @@ replay_again:
 			size[1] = len + 2 /* null */;
 			data[1] = in_iov[i].iov_base;
 
-			rc = SMB2_set_info_init(tcon, server,
-						&rqst[num_rqst], COMPOUND_FID,
-						COMPOUND_FID, current->tgid,
-						FILE_LINK_INFORMATION,
-						SMB2_O_INFO_FILE, 0, data, size);
-			if (rc)
+			if (cfile) {
+				rc = SMB2_set_info_init(tcon, server,
+							&rqst[num_rqst],
+							cfile->fid.persistent_fid,
+							cfile->fid.volatile_fid,
+							current->tgid, FILE_LINK_INFORMATION,
+							SMB2_O_INFO_FILE, 0, data, size);
+			} else {
+				rc = SMB2_set_info_init(tcon, server,
+							&rqst[num_rqst],
+							COMPOUND_FID, COMPOUND_FID,
+							current->tgid, FILE_LINK_INFORMATION,
+							SMB2_O_INFO_FILE, 0, data, size);
+			}
+
+			if (!rc && (!cfile || num_rqst > 1)) {
+				smb2_set_next_command(tcon, &rqst[num_rqst]);
+				smb2_set_related(&rqst[num_rqst]);
+			} else if (rc) {
 				goto finished;
-			smb2_set_next_command(tcon, &rqst[num_rqst]);
-			smb2_set_related(&rqst[num_rqst++]);
+			}
+			num_rqst++;
 			trace_smb3_hardlink_enter(xid, tcon->tid, ses->Suid, full_path);
 			break;
 		case SMB2_OP_SET_REPARSE:
@@ -1349,6 +1362,23 @@ int smb2_rename_path(const unsigned int xid,
 	return rc;
 }
 
+static struct cifsFileInfo *tmpfile_handle(struct inode *inode)
+{
+	struct cifsInodeInfo *cinode = CIFS_I(inode);
+	struct cifsFileInfo *cfile;
+
+	guard(spinlock)(&cinode->open_file_lock);
+	if (!test_bit(CIFS_INO_TMPFILE, &cinode->flags))
+		return ERR_PTR(-EBADF);
+
+	cfile = list_first_entry_or_null(&cinode->openFileList,
+					 struct cifsFileInfo,
+					 flist);
+	if (cfile)
+		cifsFileInfo_get(cfile);
+	return cfile ?: ERR_PTR(-EBADF);
+}
+
 int smb2_create_hardlink(const unsigned int xid,
 			 struct cifs_tcon *tcon,
 			 struct dentry *source_dentry,
@@ -1356,10 +1386,22 @@ int smb2_create_hardlink(const unsigned int xid,
 			 struct cifs_sb_info *cifs_sb)
 {
 	__u32 co = file_create_options(source_dentry);
+	struct cifsFileInfo *cfile = NULL;
+
+	if (!from_name) {
+		if (unlikely(!source_dentry ||
+			     !d_really_is_positive(source_dentry)))
+			return -EBADF;
+
+		cfile = tmpfile_handle(d_inode(source_dentry));
+		if (IS_ERR(cfile))
+			return PTR_ERR(cfile);
+		from_name = "";
+	}
 
 	return smb2_set_path_attr(xid, tcon, from_name, to_name,
 				  cifs_sb, co, FILE_READ_ATTRIBUTES,
-				  SMB2_OP_HARDLINK, NULL, NULL);
+				  SMB2_OP_HARDLINK, cfile, NULL);
 }
 
 int
@@ -1416,7 +1458,17 @@ smb2_set_file_info(struct inode *inode, const char *full_path,
 	    (buf->LastWriteTime == 0) && (buf->ChangeTime == 0)) {
 		if (buf->Attributes == 0)
 			goto out; /* would be a no op, no sense sending this */
-		cifs_get_writable_path(tcon, full_path, FIND_ANY, &cfile);
+		if (!full_path) {
+			cfile = tmpfile_handle(inode);
+			if (IS_ERR(cfile)) {
+				rc = PTR_ERR(cfile);
+				goto out;
+			}
+			full_path = "";
+		} else {
+			cifs_get_writable_path(tcon, full_path,
+					       FIND_ANY, &cfile);
+		}
 	}
 
 	oparms = CIFS_OPARMS(cifs_sb, tcon, full_path, FILE_WRITE_ATTRIBUTES,
@@ -1566,8 +1618,8 @@ int smb2_rename_pending_delete(const char *full_path,
 			       struct dentry *dentry,
 			       const unsigned int xid)
 {
-	struct cifs_sb_info *cifs_sb = CIFS_SB(d_inode(dentry)->i_sb);
 	struct cifsInodeInfo *cinode = CIFS_I(d_inode(dentry));
+	struct cifs_sb_info *cifs_sb = CIFS_SB(dentry);
 	__le16 *utf16_path __free(kfree) = NULL;
 	__u32 co = file_create_options(dentry);
 	int cmds[] = {
@@ -1579,14 +1631,10 @@ int smb2_rename_pending_delete(const char *full_path,
 	char *to_name __free(kfree) = NULL;
 	__u32 attrs = cinode->cifsAttrs;
 	struct cifs_open_parms oparms;
-	static atomic_t sillycounter;
 	struct cifsFileInfo *cfile;
 	struct tcon_link *tlink;
 	struct cifs_tcon *tcon;
 	struct kvec iov[2];
-	const char *ppath;
-	void *page;
-	size_t len;
 	int rc;
 
 	tlink = cifs_sb_tlink(cifs_sb);
@@ -1594,25 +1642,14 @@ int smb2_rename_pending_delete(const char *full_path,
 		return PTR_ERR(tlink);
 	tcon = tlink_tcon(tlink);
 
-	page = alloc_dentry_path();
-
-	ppath = build_path_from_dentry(dentry->d_parent, page);
-	if (IS_ERR(ppath)) {
-		rc = PTR_ERR(ppath);
+	to_name = cifs_silly_filename(dentry);
+	if (IS_ERR(to_name)) {
+		rc = PTR_ERR(to_name);
+		to_name = NULL;
 		goto out;
 	}
 
-	len = strlen(ppath) + strlen("/.__smb1234") + 1;
-	to_name = kmalloc(len, GFP_KERNEL);
-	if (!to_name) {
-		rc = -ENOMEM;
-		goto out;
-	}
-
-	scnprintf(to_name, len, "%s%c.__smb%04X", ppath, CIFS_DIR_SEP(cifs_sb),
-		  atomic_inc_return(&sillycounter) & 0xffff);
-
-	utf16_path = utf16_smb2_path(cifs_sb, to_name, len);
+	utf16_path = utf16_smb2_path(cifs_sb, to_name, strlen(to_name));
 	if (!utf16_path) {
 		rc = -ENOMEM;
 		goto out;
@@ -1653,6 +1690,5 @@ int smb2_rename_pending_delete(const char *full_path,
 	}
 out:
 	cifs_put_tlink(tlink);
-	free_dentry_path(page);
 	return rc;
 }
