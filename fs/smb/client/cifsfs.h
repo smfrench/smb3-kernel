@@ -13,6 +13,9 @@
 
 #define ROOT_I 2
 
+extern atomic_t cifs_sillycounter;
+extern atomic_t cifs_tmpcounter;
+
 /*
  * ino_t is 32-bits on 32-bit arch. We have to squash the 64-bit value down
  * so that it will fit. We use hash_64 to convert the value to 31 bits, and
@@ -53,6 +56,8 @@ int cifs_create(struct mnt_idmap *idmap, struct inode *inode,
 		struct dentry *direntry, umode_t mode, bool excl);
 int cifs_atomic_open(struct inode *inode, struct dentry *direntry,
 		     struct file *file, unsigned int oflags, umode_t mode);
+int cifs_tmpfile(struct mnt_idmap *idmap, struct inode *dir,
+		 struct file *file, umode_t mode);
 struct dentry *cifs_lookup(struct inode *parent_dir_inode,
 			   struct dentry *direntry, unsigned int flags);
 int cifs_unlink(struct inode *dir, struct dentry *dentry);
@@ -141,6 +146,20 @@ void cifs_setsize(struct inode *inode, loff_t offset);
 struct smb3_fs_context;
 struct dentry *cifs_smb3_do_mount(struct file_system_type *fs_type, int flags,
 				  struct smb3_fs_context *old_ctx);
+
+char *cifs_silly_filename(struct dentry *dentry);
+char *cifs_tmpfile_name(struct dentry *dentry);
+
+#define CIFS_TMPFILE_PREFIX		"%c.smb%04X__"
+#define CIFS_TMPFILE_PREFIX_LEN	sizeof(".smb1234__")
+
+#define CIFS_SILLY_FILENAME_SUFFIX	"silly"
+#define CIFS_SILLY_FILENAME_SIZE \
+	(CIFS_TMPFILE_PREFIX_LEN + sizeof(CIFS_SILLY_FILENAME_SUFFIX))
+
+#define CIFS_TMP_FILENAME_SUFFIX	"tmp"
+#define CIFS_TMP_FILENAME_SIZE \
+	(CIFS_TMPFILE_PREFIX_LEN + sizeof(CIFS_TMP_FILENAME_SUFFIX))
 
 #ifdef CONFIG_CIFS_NFSD_EXPORT
 extern const struct export_operations cifs_export_ops;

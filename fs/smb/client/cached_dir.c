@@ -477,6 +477,9 @@ void drop_cached_dir_by_name(const unsigned int xid, struct cifs_tcon *tcon,
 	struct cached_fid *cfid = NULL;
 	int rc;
 
+	if (!name)
+		return;
+
 	rc = open_cached_dir(xid, tcon, name, cifs_sb, true, &cfid);
 	if (rc) {
 		cifs_dbg(FYI, "no cached dir found for rmdir(%s)\n", name);

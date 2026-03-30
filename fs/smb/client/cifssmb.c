@@ -2715,6 +2715,9 @@ CIFSUnixCreateHardLink(const unsigned int xid, struct cifs_tcon *tcon,
 
 	cifs_dbg(FYI, "In Create Hard link Unix style\n");
 createHardLinkRetry:
+	if (!fromName)
+		return -EBADF;
+
 	rc = smb_init(SMB_COM_TRANSACTION2, 15, tcon, (void **) &pSMB,
 		      (void **) &pSMBr);
 	if (rc < 0)

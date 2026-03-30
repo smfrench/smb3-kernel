@@ -696,6 +696,7 @@ struct cifsFileInfo *cifs_new_fileinfo(struct cifs_fid *fid, struct file *file,
 	cfile->f_flags = file->f_flags;
 	cfile->invalidHandle = false;
 	cfile->deferred_close_scheduled = false;
+	cfile->status_file_deleted = file->f_flags & O_TMPFILE;
 	cfile->tlink = cifs_get_tlink(tlink);
 	INIT_WORK(&cfile->oplock_break, cifs_oplock_break);
 	INIT_WORK(&cfile->put, cifsFileInfo_put_work);
@@ -715,6 +716,8 @@ struct cifsFileInfo *cifs_new_fileinfo(struct cifs_fid *fid, struct file *file,
 
 	cifs_down_write(&cinode->lock_sem);
 	list_add(&fdlocks->llist, &cinode->llist);
+	if (file->f_flags & O_TMPFILE)
+		set_bit(CIFS_INO_TMPFILE, &cinode->flags);
 	up_write(&cinode->lock_sem);
 
 	spin_lock(&tcon->open_file_lock);
@@ -2605,6 +2608,15 @@ int __cifs_get_writable_file(struct cifsInodeInfo *cifs_inode,
 		fsuid_only = false;
 
 	spin_lock(&cifs_inode->open_file_lock);
+	if (test_bit(CIFS_INO_TMPFILE, &cifs_inode->flags)) {
+		*ret_file = list_first_entry_or_null(&cifs_inode->openFileList,
+						     struct cifsFileInfo,
+						     flist);
+		if (*ret_file)
+			cifsFileInfo_get(*ret_file);
+		spin_unlock(&cifs_inode->open_file_lock);
+		return *ret_file ? 0 : -EBADF;
+	}
 refind_writable:
 	if (refind > MAX_REOPEN_ATT) {
 		spin_unlock(&cifs_inode->open_file_lock);
@@ -2683,16 +2695,23 @@ find_writable_file(struct cifsInodeInfo *cifs_inode, int flags)
 	return cfile;
 }
 
-int
-cifs_get_writable_path(struct cifs_tcon *tcon, const char *name,
-		       int flags,
-		       struct cifsFileInfo **ret_file)
+int cifs_get_writable_path(struct cifs_tcon *tcon, const char *name,
+			   struct inode *inode, int flags,
+			   struct cifsFileInfo **ret_file)
 {
+
 	struct cifsFileInfo *cfile;
-	void *page = alloc_dentry_path();
+	void *page;
 
 	*ret_file = NULL;
 
+	if (!name) {
+		if (WARN_ON_ONCE(!inode))
+			return -EBADF;
+		return cifs_get_writable_file(CIFS_I(inode), flags, ret_file);
+	}
+
+	page = alloc_dentry_path();
 	spin_lock(&tcon->open_file_lock);
 	list_for_each_entry(cfile, &tcon->openFileList, tlist) {
 		struct cifsInodeInfo *cinode;

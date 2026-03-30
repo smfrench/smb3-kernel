@@ -444,7 +444,7 @@ cifs_hardlink(struct dentry *old_file, struct inode *inode,
 	int rc = -EACCES;
 	unsigned int xid;
 	const char *from_name, *to_name;
-	void *page1, *page2;
+	void *page1 = NULL, *page2 = NULL;
 	struct cifs_sb_info *cifs_sb = CIFS_SB(inode->i_sb);
 	struct tcon_link *tlink;
 	struct cifs_tcon *tcon;
@@ -460,14 +460,25 @@ cifs_hardlink(struct dentry *old_file, struct inode *inode,
 	tcon = tlink_tcon(tlink);
 
 	xid = get_xid();
-	page1 = alloc_dentry_path();
-	page2 = alloc_dentry_path();
 
+	if (d_really_is_positive(old_file)) {
+		cifsInode = CIFS_I(d_inode(old_file));
+		guard(spinlock)(&cifsInode->open_file_lock);
+		if (test_bit(CIFS_INO_TMPFILE, &cifsInode->flags)) {
+			from_name = NULL;
+			goto tmpfile;
+		}
+	}
+
+	page1 = alloc_dentry_path();
 	from_name = build_path_from_dentry(old_file, page1);
 	if (IS_ERR(from_name)) {
 		rc = PTR_ERR(from_name);
 		goto cifs_hl_exit;
 	}
+
+tmpfile:
+	page2 = alloc_dentry_path();
 	to_name = build_path_from_dentry(direntry, page2);
 	if (IS_ERR(to_name)) {
 		rc = PTR_ERR(to_name);
@@ -503,6 +514,7 @@ cifs_hardlink(struct dentry *old_file, struct inode *inode,
 	if (d_really_is_positive(old_file)) {
 		cifsInode = CIFS_I(d_inode(old_file));
 		if (rc == 0) {
+			clear_bit(CIFS_INO_TMPFILE, &cifsInode->flags);
 			spin_lock(&d_inode(old_file)->i_lock);
 			inc_nlink(d_inode(old_file));
 			spin_unlock(&d_inode(old_file)->i_lock);
