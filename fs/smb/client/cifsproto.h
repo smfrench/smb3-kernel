@@ -374,6 +374,7 @@ bool cifs_chan_needs_reconnect(struct cifs_ses *ses,
 bool cifs_chan_is_iface_active(struct cifs_ses *ses,
 			       struct TCP_Server_Info *server);
 void cifs_decrease_secondary_channels(struct cifs_ses *ses,
+				      bool from_reconnect,
 				      bool disable_mchan);
 void cifs_chan_update_iface(struct cifs_ses *ses,
 			    struct TCP_Server_Info *server);

@@ -273,7 +273,7 @@ int cifs_try_adding_channels(struct cifs_ses *ses)
  * Otherwise, it disables all but the primary channel.
  */
 void
-cifs_decrease_secondary_channels(struct cifs_ses *ses, bool disable_mchan)
+cifs_decrease_secondary_channels(struct cifs_ses *ses, bool from_reconnect, bool disable_mchan)
 {
 	int i, chan_count;
 	struct TCP_Server_Info *server;
@@ -319,7 +319,7 @@ cifs_decrease_secondary_channels(struct cifs_ses *ses, bool disable_mchan)
 				server->terminate = true;
 				cifs_signal_cifsd_for_reconnect(server, false);
 			}
-			cifs_put_tcp_session(server, false);
+			cifs_put_tcp_session(server, from_reconnect);
 		}
 
 		spin_lock(&ses->chan_lock);

@@ -206,7 +206,7 @@ skip_terminate:
 		return -EHOSTDOWN;
 	}
 
-	cifs_decrease_secondary_channels(ses, disable_mchan);
+	cifs_decrease_secondary_channels(ses, from_reconnect, disable_mchan);
 
 	return 0;
 }
