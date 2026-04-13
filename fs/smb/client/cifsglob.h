@@ -1049,8 +1049,8 @@ struct cifs_chan {
 	__u8 signkey[SMB3_SIGN_KEY_SIZE];
 };
 
-#define CIFS_SES_FLAG_SCALE_CHANNELS (0x1)
-#define CIFS_SES_FLAGS_PENDING_QUERY_INTERFACES (0x2)
+#define CIFS_SES_FLAG_SCALE_CHANNELS 0
+#define CIFS_SES_FLAGS_PENDING_QUERY_INTERFACES 1
 
 /*
  * Session structure.  One of these for each uid session with a particular host
@@ -1089,7 +1089,7 @@ struct cifs_ses {
 	bool domainAuto:1;
 	bool expired_pwd;  /* track if access denied or expired pwd so can know if need to update */
 	int unicode;
-	unsigned int flags;
+	unsigned long flags;
 	__u16 session_flags;
 	__u8 smb3signingkey[SMB3_SIGN_KEY_SIZE];
 	__u8 smb3encryptionkey[SMB3_ENC_DEC_KEY_SIZE];

@@ -228,6 +228,10 @@ int smb3_update_ses_channels(struct cifs_ses *ses, struct TCP_Server_Info *serve
 			bool from_reconnect, bool disable_mchan)
 {
 	int rc = 0;
+
+	if (test_and_set_bit(CIFS_SES_FLAG_SCALE_CHANNELS, &ses->flags))
+		return -EBUSY;
+
 	/*
 	 * Manage session channels based on current count vs max:
 	 * - If disable requested, skip or disable the channel
@@ -243,6 +247,7 @@ int smb3_update_ses_channels(struct cifs_ses *ses, struct TCP_Server_Info *serve
 			rc = cifs_chan_skip_or_disable(ses, server, from_reconnect, disable_mchan);
 	}
 
+	clear_bit(CIFS_SES_FLAG_SCALE_CHANNELS, &ses->flags);
 	return rc;
 }
 
@@ -432,15 +437,6 @@ skip_sess_setup:
 		goto out;
 	}
 
-	spin_lock(&ses->ses_lock);
-	if (ses->flags & CIFS_SES_FLAG_SCALE_CHANNELS) {
-		spin_unlock(&ses->ses_lock);
-		mutex_unlock(&ses->session_mutex);
-		goto skip_add_channels;
-	}
-	ses->flags |= CIFS_SES_FLAG_SCALE_CHANNELS;
-	spin_unlock(&ses->ses_lock);
-
 	if (!rc &&
 	    (server->capabilities & SMB2_GLOBAL_CAP_MULTI_CHANNEL) &&
 	    server->ops->query_server_interfaces) {
@@ -450,11 +446,11 @@ skip_sess_setup:
 		 * is in progress. This will be used to avoid calling
 		 * smb2_reconnect recursively.
 		 */
-		ses->flags |= CIFS_SES_FLAGS_PENDING_QUERY_INTERFACES;
+		set_bit(CIFS_SES_FLAGS_PENDING_QUERY_INTERFACES, &ses->flags);
 		xid = get_xid();
 		rc = server->ops->query_server_interfaces(xid, tcon, false);
 		free_xid(xid);
-		ses->flags &= ~CIFS_SES_FLAGS_PENDING_QUERY_INTERFACES;
+		clear_bit(CIFS_SES_FLAGS_PENDING_QUERY_INTERFACES, &ses->flags);
 
 		if (!tcon->ipc && !tcon->dummy)
 			queue_delayed_work(cifsiod_wq, &tcon->query_interfaces,
@@ -492,10 +488,6 @@ skip_sess_setup:
 	}
 
 skip_add_channels:
-	spin_lock(&ses->ses_lock);
-	ses->flags &= ~CIFS_SES_FLAG_SCALE_CHANNELS;
-	spin_unlock(&ses->ses_lock);
-
 	if (smb2_command != SMB2_INTERNAL_CMD)
 		cifs_queue_server_reconn(server);
 
@@ -609,7 +601,7 @@ static int smb2_ioctl_req_init(u32 opcode, struct cifs_tcon *tcon,
 	 */
 	if (opcode == FSCTL_VALIDATE_NEGOTIATE_INFO ||
 	    (opcode == FSCTL_QUERY_NETWORK_INTERFACE_INFO &&
-	     (tcon->ses->flags & CIFS_SES_FLAGS_PENDING_QUERY_INTERFACES)))
+	     test_bit(CIFS_SES_FLAGS_PENDING_QUERY_INTERFACES, &tcon->ses->flags)))
 		return __smb2_plain_req_init(SMB2_IOCTL, tcon, server,
 					     request_buf, total_len);
 
