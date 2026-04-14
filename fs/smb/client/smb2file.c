@@ -41,6 +41,8 @@ static struct smb2_symlink_err_rsp *symlink_data(const struct kvec *iov)
 		p = (struct smb2_error_context_rsp *)err->ErrorData;
 		end = (struct smb2_error_context_rsp *)((u8 *)err + iov->iov_len);
 		do {
+			if ((u8 *)p + sizeof(*p) > (u8 *)end)
+				return ERR_PTR(-EINVAL);
 			if (le32_to_cpu(p->ErrorId) == SMB2_ERROR_ID_DEFAULT) {
 				sym = (struct smb2_symlink_err_rsp *)p->ErrorContextData;
 				break;
@@ -56,9 +58,15 @@ static struct smb2_symlink_err_rsp *symlink_data(const struct kvec *iov)
 		sym = (struct smb2_symlink_err_rsp *)err->ErrorData;
 	}
 
-	if (!IS_ERR(sym) && (le32_to_cpu(sym->SymLinkErrorTag) != SYMLINK_ERROR_TAG ||
-			     le32_to_cpu(sym->ReparseTag) != IO_REPARSE_TAG_SYMLINK))
-		sym = ERR_PTR(-EINVAL);
+	if (IS_ERR(sym))
+		return sym;
+
+	if ((u8 *)sym + sizeof(*sym) > (u8 *)err + iov->iov_len)
+		return ERR_PTR(-EINVAL);
+
+	if (le32_to_cpu(sym->SymLinkErrorTag) != SYMLINK_ERROR_TAG ||
+	    le32_to_cpu(sym->ReparseTag) != IO_REPARSE_TAG_SYMLINK)
+		return ERR_PTR(-EINVAL);
 
 	return sym;
 }
@@ -115,6 +123,7 @@ int smb2_parse_symlink_response(struct cifs_sb_info *cifs_sb, const struct kvec 
 	struct smb2_symlink_err_rsp *sym;
 	unsigned int sub_offs, sub_len;
 	unsigned int print_offs, print_len;
+	size_t pathbuf_off;
 
 	if (!cifs_sb || !iov || !iov->iov_base || !iov->iov_len || !path)
 		return -EINVAL;
@@ -128,8 +137,11 @@ int smb2_parse_symlink_response(struct cifs_sb_info *cifs_sb, const struct kvec 
 	print_len = le16_to_cpu(sym->PrintNameLength);
 	print_offs = le16_to_cpu(sym->PrintNameOffset);
 
-	if (iov->iov_len < SMB2_SYMLINK_STRUCT_SIZE + sub_offs + sub_len ||
-	    iov->iov_len < SMB2_SYMLINK_STRUCT_SIZE + print_offs + print_len)
+	pathbuf_off = (const u8 *)sym->PathBuffer - (const u8 *)iov->iov_base;
+
+	if (pathbuf_off > iov->iov_len ||
+	    iov->iov_len - pathbuf_off < sub_offs + sub_len ||
+	    iov->iov_len - pathbuf_off < print_offs + print_len)
 		return -EINVAL;
 
 	return smb2_parse_native_symlink(path,
