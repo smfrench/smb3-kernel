@@ -1085,10 +1085,12 @@ static int smb3_reconfigure(struct fs_context *fc)
 	struct dentry *root = fc->root;
 	struct cifs_sb_info *cifs_sb = CIFS_SB(root->d_sb);
 	struct cifs_ses *ses = cifs_sb_master_tcon(cifs_sb)->ses;
+	unsigned int old_chan_max;
 	unsigned int rsize = ctx->rsize, wsize = ctx->wsize;
 	char *new_password = NULL, *new_password2 = NULL;
 	bool need_recon = false;
-	int rc;
+	bool scale_busy = false;
+	int rc, mchan_rc = 0;
 
 	if (ses->expired_pwd)
 		need_recon = true;
@@ -1170,24 +1172,37 @@ static int smb3_reconfigure(struct fs_context *fc)
 	if ((ctx->multichannel != cifs_sb->ctx->multichannel) ||
 	    (ctx->max_channels != cifs_sb->ctx->max_channels)) {
 
-		/* Synchronize ses->chan_max with the new mount context */
-		smb3_sync_ses_chan_max(ses, ctx->max_channels);
-		/* Now update the session's channels to match the new configuration */
 		/* Prevent concurrent scaling operations */
 		spin_lock(&ses->ses_lock);
 		if (ses->flags & CIFS_SES_FLAG_SCALE_CHANNELS) {
 			spin_unlock(&ses->ses_lock);
 			mutex_unlock(&ses->session_mutex);
-			return -EINVAL;
+			scale_busy = true;
+			mchan_rc = -EINVAL;
+			goto out;
 		}
 		ses->flags |= CIFS_SES_FLAG_SCALE_CHANNELS;
 		spin_unlock(&ses->ses_lock);
+
+		old_chan_max = ses->chan_max;
+		/* Synchronize ses->chan_max with the new mount context */
+		smb3_sync_ses_chan_max(ses, ctx->max_channels);
 
 		mutex_unlock(&ses->session_mutex);
 
 		rc = smb3_update_ses_channels(ses, ses->server,
 					       false /* from_reconnect */,
 					       false /* disable_mchan */);
+
+		/*
+		 * On failure, restore chan_max while still holding
+		 * CIFS_SES_FLAG_SCALE_CHANNELS so a concurrent reconfigure
+		 * cannot observe or race with the rollback.
+		 */
+		if (rc < 0) {
+			smb3_sync_ses_chan_max(ses, old_chan_max);
+			mchan_rc = rc;
+		}
 
 		/* Clear scaling flag after operation */
 		spin_lock(&ses->ses_lock);
@@ -1197,6 +1212,7 @@ static int smb3_reconfigure(struct fs_context *fc)
 		mutex_unlock(&ses->session_mutex);
 	}
 
+out:
 	STEAL_STRING(cifs_sb, ctx, domainname);
 	STEAL_STRING(cifs_sb, ctx, nodename);
 	STEAL_STRING(cifs_sb, ctx, iocharset);
@@ -1205,6 +1221,16 @@ static int smb3_reconfigure(struct fs_context *fc)
 	ctx->rsize = rsize ? CIFS_ALIGN_RSIZE(fc, rsize) : cifs_sb->ctx->rsize;
 	ctx->wsize = wsize ? CIFS_ALIGN_WSIZE(fc, wsize) : cifs_sb->ctx->wsize;
 
+	/*
+	 * If the multichannel update failed, restore the old multichannel
+	 * settings in ctx so smb3_fs_context_dup() does not desync
+	 * cifs_sb->ctx from ses->chan_max (which was already rolled back).
+	 */
+	if (mchan_rc) {
+		ctx->multichannel = cifs_sb->ctx->multichannel;
+		ctx->max_channels = cifs_sb->ctx->max_channels;
+	}
+
 	smb3_cleanup_fs_context_contents(cifs_sb->ctx);
 	rc = smb3_fs_context_dup(cifs_sb->ctx, ctx);
 	smb3_update_mnt_flags(cifs_sb);
@@ -1212,6 +1238,16 @@ static int smb3_reconfigure(struct fs_context *fc)
 	if (!rc)
 		rc = dfs_cache_remount_fs(cifs_sb);
 #endif
+
+	/*
+	 * Preserve the pre-existing loser-path semantics: a concurrent
+	 * scaling operation causes the remount to be rejected with
+	 * -EINVAL. smb3_fs_context_dup() / dfs_cache_remount_fs()
+	 * failures take precedence because they reflect real state
+	 * recovery errors. Other multichannel failures remain best-effort.
+	 */
+	if (!rc && scale_busy)
+		rc = -EINVAL;
 
 	return rc;
 }
