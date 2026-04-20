@@ -17,8 +17,7 @@
  * Compression parameters.
  */
 #define LZ77_MATCH_MIN_LEN	4
-#define LZ77_MATCH_MIN_DIST	1
-#define LZ77_MATCH_MAX_DIST	SZ_1K
+#define LZ77_MATCH_MAX_DIST	SZ_8K
 #define LZ77_HASH_LOG		15
 #define LZ77_HASH_SIZE		(1 << LZ77_HASH_LOG)
 #define LZ77_STEP_SIZE		sizeof(u64)
@@ -48,17 +47,17 @@ static __always_inline void lz77_write32(u32 *ptr, u32 v)
 	put_unaligned_le32(v, ptr);
 }
 
-static __always_inline u32 lz77_match_len(const void *wnd, const void *cur, const void *end)
+static __always_inline u32 lz77_match_len(const void *match, const void *cur, const void *end)
 {
 	const void *start = cur;
 	u64 diff;
 
 	/* Safe for a do/while because otherwise we wouldn't reach here from the main loop. */
 	do {
-		diff = lz77_read64(cur) ^ lz77_read64(wnd);
+		diff = lz77_read64(cur) ^ lz77_read64(match);
 		if (!diff) {
 			cur += LZ77_STEP_SIZE;
-			wnd += LZ77_STEP_SIZE;
+			match += LZ77_STEP_SIZE;
 
 			continue;
 		}
@@ -67,10 +66,13 @@ static __always_inline u32 lz77_match_len(const void *wnd, const void *cur, cons
 		cur += count_trailing_zeros(diff) >> 3;
 
 		return (cur - start);
-	} while (likely(cur + LZ77_STEP_SIZE < end));
+	} while (likely(cur + LZ77_STEP_SIZE <= end));
 
-	while (cur < end && lz77_read8(cur++) == lz77_read8(wnd++))
-		;
+	/* Fallback to byte-by-byte comparison for last <8 bytes. */
+	while (cur < end && lz77_read8(cur) == lz77_read8(match)) {
+		cur++;
+		match++;
+	}
 
 	return (cur - start);
 }
@@ -137,6 +139,10 @@ noinline int lz77_compress(const void *src, u32 slen, void *dst, u32 *dlen)
 	long flag = 0;
 	u64 *htable;
 
+	/* This is probably a bug, so throw a warning. */
+	if (WARN_ON_ONCE(*dlen < lz77_compressed_alloc_size(slen)))
+		return -EINVAL;
+
 	srcp = src;
 	end = src + slen;
 	dstp = dst;
@@ -180,15 +186,6 @@ noinline int lz77_compress(const void *src, u32 slen, void *dst, u32 *dlen)
 			continue;
 		}
 
-		/*
-		 * Bail out if @dstp reached >= 7/8 of @slen -- already compressed badly, not worth
-		 * going further.
-		 */
-		if (unlikely(dstp - dst >= slen - (slen >> 3))) {
-			*dlen = slen;
-			goto out;
-		}
-
 		dstp = lz77_write_match(dstp, &nib, dist, len);
 		srcp += len;
 
@@ -200,7 +197,7 @@ noinline int lz77_compress(const void *src, u32 slen, void *dst, u32 *dlen)
 			flag_pos = dstp;
 			dstp += 4;
 		}
-	} while (likely(srcp + LZ77_STEP_SIZE < end));
+	} while (likely(srcp + LZ77_STEP_SIZE <= end));
 
 	while (srcp < end) {
 		u32 c = umin(end - srcp, 32 - flag_count);
@@ -221,11 +218,10 @@ noinline int lz77_compress(const void *src, u32 slen, void *dst, u32 *dlen)
 	}
 
 	flag <<= (32 - flag_count);
-	flag |= (1 << (32 - flag_count)) - 1;
+	flag |= (1UL << (32 - flag_count)) - 1;
 	lz77_write32(flag_pos, flag);
 
 	*dlen = dstp - dst;
-out:
 	kvfree(htable);
 
 	if (*dlen < slen)
