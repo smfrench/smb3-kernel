@@ -552,7 +552,13 @@ replay_again:
 
 finished:
 	num_rqst = 0;
-	SMB2_open_free(&rqst[num_rqst++]);
+	/*
+	 * If cfile was passed, the open was skipped; check rq_iov
+	 * to ensure we don't try to dereference a NULL pointer.
+	 */
+	if (rqst[num_rqst].rq_iov)
+		SMB2_open_free(&rqst[num_rqst]);
+	num_rqst++;
 	if (rc == -EREMCHG) {
 		pr_warn_once("server share %s deleted\n", tcon->tree_name);
 		tcon->need_reconnect = true;
