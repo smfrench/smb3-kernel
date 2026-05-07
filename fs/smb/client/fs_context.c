@@ -717,13 +717,13 @@ static int smb3_handle_conflicting_options(struct fs_context *fc)
 				ctx->multichannel = true;
 			else
 				ctx->multichannel = false;
-		} else {
+		} else if (fc->purpose != FS_CONTEXT_FOR_RECONFIGURE) {
 			ctx->multichannel = false;
 			ctx->max_channels = 1;
 		}
+		/* For reconfigure with neither specified, keep inherited values */
 	}
 
-	//resetting default values as remount doesn't initialize fs_context again
 	ctx->multichannel_specified = false;
 	ctx->max_channels_specified = false;
 
@@ -922,6 +922,85 @@ static void smb3_fs_context_free(struct fs_context *fc)
 }
 
 /*
+ * Sync cifs_sb->ctx with the runtime state visible through /proc/mounts.
+ * cifs_show_options() reads many fields from tcon/server/ses rather than
+ * from ctx.  On remount, libmount reads /proc/mounts and feeds those
+ * values back as mount options.  To avoid false mismatches between the
+ * old ctx and the newly parsed options, we must ensure ctx reflects
+ * the current runtime state before it is duplicated into the new
+ * remount context.
+ *
+ * Note: sb->s_umount is not yet held when VFS calls init_fs_context()
+ * for reconfigure, so in theory concurrent I/O paths could read
+ * cifs_sb->ctx fields (e.g. cifs_symlink_type()) while we write them.
+ * This is safe because all fields written here are word-sized
+ * (bool/int/pointer), so stores are architecturally atomic.  The same
+ * unsynchronized-read pattern already exists in cifs_show_options().
+ */
+static void smb3_sync_ctx_from_tcon(struct cifs_sb_info *cifs_sb)
+{
+	struct cifs_tcon *tcon = cifs_sb_master_tcon(cifs_sb);
+	struct TCP_Server_Info *server = tcon->ses->server;
+	struct cifs_ses *ses = tcon->ses;
+	struct smb3_fs_context *ctx = cifs_sb->ctx;
+	const char *domain;
+	int unicode;
+
+	/*
+	 * Server fields: ops/vals can change during reconnect
+	 * (renegotiation may upgrade the dialect).  nosharesock can
+	 * transition false->true if the server sets
+	 * SMB2_SHAREFLAG_ISOLATED_TRANSPORT during tree connect.
+	 * Read all under srv_lock to get a consistent snapshot.
+	 */
+	spin_lock(&server->srv_lock);
+	ctx->ops = server->ops;
+	ctx->vals = server->vals;
+	ctx->nosharesock = server->nosharesock;
+	spin_unlock(&server->srv_lock);
+
+	/*
+	 * Tcon fields: posix_extensions, unix_ext, use_persistent and
+	 * use_resilient are set during tree connect and do not change
+	 * after that, but read under tc_lock for consistency with the
+	 * convention that tc_lock protects tcon state.
+	 */
+	spin_lock(&tcon->tc_lock);
+	if (tcon->posix_extensions) {
+		ctx->linux_ext = 1;
+		ctx->no_linux_ext = 0;
+	} else if (tcon->unix_ext) {
+		ctx->linux_ext = 1;
+		ctx->no_linux_ext = 0;
+	} else {
+		ctx->linux_ext = 0;
+		ctx->no_linux_ext = 1;
+	}
+	if (tcon->use_persistent) {
+		ctx->persistent = true;
+		ctx->nopersistent = false;
+	}
+	ctx->resilient = tcon->use_resilient;
+	spin_unlock(&tcon->tc_lock);
+
+	/*
+	 * Session fields: domainName and unicode are effectively
+	 * write-once (set during session setup, never freed/replaced
+	 * while the session exists).  Snapshot them under ses_lock
+	 * and kstrdup the domain outside the lock.
+	 */
+	spin_lock(&ses->ses_lock);
+	domain = ses->domainName;
+	unicode = ses->unicode;
+	spin_unlock(&ses->ses_lock);
+
+	if (domain && !ctx->domainname)
+		ctx->domainname = kstrdup(domain, GFP_KERNEL);
+	if (unicode >= 0)
+		ctx->unicode = unicode;
+}
+
+/*
  * Compare the old and new proposed context during reconfigure
  * and check if the changes are compatible.
  */
@@ -988,6 +1067,143 @@ static int smb3_verify_reconfigure_ctx(struct fs_context *fc,
 	}
 	if (new_ctx->rfc1001_sessinit != old_ctx->rfc1001_sessinit) {
 		cifs_errorf(fc, "can not change nbsessinit during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->compress != old_ctx->compress) {
+		cifs_errorf(fc, "can not change compress during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->noblocksnd != old_ctx->noblocksnd) {
+		cifs_errorf(fc, "can not change noblocksend during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->noautotune != old_ctx->noautotune) {
+		cifs_errorf(fc, "can not change noautotune during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->no_sparse != old_ctx->no_sparse) {
+		cifs_errorf(fc, "can not change nosparse during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->nodelete != old_ctx->nodelete) {
+		cifs_errorf(fc, "can not change nodelete during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->cruid_specified &&
+	    !uid_eq(new_ctx->cred_uid, old_ctx->cred_uid)) {
+		cifs_errorf(fc, "can not change cruid during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->port != old_ctx->port) {
+		cifs_errorf(fc, "can not change port during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->min_offload != old_ctx->min_offload) {
+		cifs_errorf(fc, "can not change min_enc_offload during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->snapshot_time != old_ctx->snapshot_time) {
+		cifs_errorf(fc, "can not change snapshot during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->max_credits != old_ctx->max_credits) {
+		cifs_errorf(fc, "can not change max_credits during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->handle_timeout != old_ctx->handle_timeout) {
+		cifs_errorf(fc, "can not change handletimeout during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->got_ip &&
+	    !cifs_match_ipaddr((struct sockaddr *)&new_ctx->dstaddr,
+			       (struct sockaddr *)&old_ctx->dstaddr)) {
+		cifs_errorf(fc, "can not change ip during remount\n");
+		return -EINVAL;
+	}
+	if (((struct sockaddr *)&new_ctx->srcaddr)->sa_family != AF_UNSPEC &&
+	    memcmp(&new_ctx->srcaddr, &old_ctx->srcaddr, sizeof(new_ctx->srcaddr))) {
+		cifs_errorf(fc, "can not change srcaddr during remount\n");
+		return -EINVAL;
+	}
+	if (memcmp(new_ctx->source_rfc1001_name, old_ctx->source_rfc1001_name,
+		   RFC1001_NAME_LEN)) {
+		cifs_errorf(fc, "can not change netbiosname during remount\n");
+		return -EINVAL;
+	}
+	if (memcmp(new_ctx->target_rfc1001_name, old_ctx->target_rfc1001_name,
+		   RFC1001_NAME_LEN)) {
+		cifs_errorf(fc, "can not change servern during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->got_version &&
+	    (new_ctx->ops != old_ctx->ops || new_ctx->vals != old_ctx->vals)) {
+		cifs_errorf(fc, "can not change vers during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->witness != old_ctx->witness) {
+		cifs_errorf(fc, "can not change witness during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->rootfs != old_ctx->rootfs) {
+		cifs_errorf(fc, "can not change rootfs during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->linux_ext != old_ctx->linux_ext ||
+	    new_ctx->no_linux_ext != old_ctx->no_linux_ext) {
+		cifs_errorf(fc, "can not change unix during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->nocase != old_ctx->nocase) {
+		cifs_errorf(fc, "can not change nocase during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->intr != old_ctx->intr) {
+		cifs_errorf(fc, "can not change intr during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->no_psx_acl != old_ctx->no_psx_acl) {
+		cifs_errorf(fc, "can not change acl during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->local_lease != old_ctx->local_lease) {
+		cifs_errorf(fc, "can not change locallease during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->sign != old_ctx->sign) {
+		cifs_errorf(fc, "can not change sign during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->ignore_signature != old_ctx->ignore_signature) {
+		cifs_errorf(fc, "can not change ignore_signature during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->seal != old_ctx->seal) {
+		cifs_errorf(fc, "can not change seal during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->nosharesock != old_ctx->nosharesock) {
+		cifs_errorf(fc, "can not change nosharesock during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->persistent != old_ctx->persistent ||
+	    new_ctx->nopersistent != old_ctx->nopersistent) {
+		cifs_errorf(fc, "can not change persistenthandles during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->resilient != old_ctx->resilient) {
+		cifs_errorf(fc, "can not change resilienthandles during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->sockopt_tcp_nodelay != old_ctx->sockopt_tcp_nodelay) {
+		cifs_errorf(fc, "can not change tcpnodelay during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->domainauto != old_ctx->domainauto) {
+		cifs_errorf(fc, "can not change domainauto during remount\n");
+		return -EINVAL;
+	}
+	if (new_ctx->rdma != old_ctx->rdma) {
+		cifs_errorf(fc, "can not change rdma during remount\n");
 		return -EINVAL;
 	}
 
@@ -1902,6 +2118,40 @@ int smb3_init_fs_context(struct fs_context *fc)
 	struct smb3_fs_context *ctx;
 	char *nodename = utsname()->nodename;
 	int i;
+
+	/*
+	 * For reconfigure (remount), duplicate the existing mount context
+	 * instead of building one from scratch with init defaults.
+	 *
+	 * VFS sets fc->root before calling init_fs_context for reconfigure,
+	 * so we can access the existing superblock's context.  We first sync
+	 * cifs_sb->ctx with runtime state (tcon/server/ses) so that ctx
+	 * matches what cifs_show_options() displays.  Then we dup old_ctx
+	 * into new_ctx.  The parser will overwrite only the options
+	 * explicitly passed on remount, so any difference between new_ctx
+	 * and old_ctx in smb3_verify_reconfigure_ctx() represents a real,
+	 * intentional change by the user.
+	 */
+	if (fc->purpose == FS_CONTEXT_FOR_RECONFIGURE) {
+		struct cifs_sb_info *cifs_sb = CIFS_SB(fc->root->d_sb);
+		int rc;
+
+		smb3_sync_ctx_from_tcon(cifs_sb);
+
+		ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+		if (!ctx)
+			return -ENOMEM;
+
+		rc = smb3_fs_context_dup(ctx, cifs_sb->ctx);
+		if (rc) {
+			kfree(ctx);
+			return rc;
+		}
+
+		fc->fs_private = ctx;
+		fc->ops = &smb3_fs_context_ops;
+		return 0;
+	}
 
 	ctx = kzalloc_obj(struct smb3_fs_context);
 	if (unlikely(!ctx))
