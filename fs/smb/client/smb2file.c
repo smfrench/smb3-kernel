@@ -31,7 +31,7 @@ static struct smb2_symlink_err_rsp *symlink_data(const struct kvec *iov)
 	u32 len;
 
 	if (err->ErrorContextCount) {
-		struct smb2_error_context_rsp *p;
+		struct smb2_error_context_rsp *p, *next;
 
 		len = (u32)err->ErrorContextCount * (offsetof(struct smb2_error_context_rsp,
 							      ErrorContextData) +
@@ -49,7 +49,10 @@ static struct smb2_symlink_err_rsp *symlink_data(const struct kvec *iov)
 				 __func__, le32_to_cpu(p->ErrorId));
 
 			len = ALIGN(le32_to_cpu(p->ErrorDataLength), 8);
-			p = (struct smb2_error_context_rsp *)(p->ErrorContextData + len);
+			next = (struct smb2_error_context_rsp *)(p->ErrorContextData + len);
+			if (next <= p)
+				return ERR_PTR(-EINVAL);
+			p = next;
 		}
 	} else if (le32_to_cpu(err->ByteCount) >= sizeof(*sym) &&
 		   iov->iov_len >= SMB2_SYMLINK_STRUCT_SIZE) {
