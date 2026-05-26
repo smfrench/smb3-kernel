@@ -1408,7 +1408,14 @@ static int build_sec_desc(struct smb_ntsd *pntsd, struct smb_ntsd *pnntsd,
 				goto chown_chgrp_exit;
 			}
 			id = from_kuid(&init_user_ns, uid);
-			if (id_from_sid) {
+			if (posix) {
+				/* SMB3.1.1 POSIX: Unix Mapping owner SID S-1-22-1-<uid> */
+				nowner_sid_ptr->revision = 1;
+				nowner_sid_ptr->num_subauth = 2;
+				nowner_sid_ptr->authority[5] = 22;
+				nowner_sid_ptr->sub_auth[0] = cpu_to_le32(1);
+				nowner_sid_ptr->sub_auth[1] = cpu_to_le32(id);
+			} else if (id_from_sid) {
 				struct owner_sid *osid = (struct owner_sid *)nowner_sid_ptr;
 				/* Populate the user ownership fields S-1-5-88-1 */
 				osid->Revision = 1;
@@ -1436,7 +1443,14 @@ static int build_sec_desc(struct smb_ntsd *pntsd, struct smb_ntsd *pnntsd,
 				goto chown_chgrp_exit;
 			}
 			id = from_kgid(&init_user_ns, gid);
-			if (id_from_sid) {
+			if (posix) {
+				/* SMB3.1.1 POSIX: Unix Mapping group SID S-1-22-2-<gid> */
+				ngroup_sid_ptr->revision = 1;
+				ngroup_sid_ptr->num_subauth = 2;
+				ngroup_sid_ptr->authority[5] = 22;
+				ngroup_sid_ptr->sub_auth[0] = cpu_to_le32(2);
+				ngroup_sid_ptr->sub_auth[1] = cpu_to_le32(id);
+			} else if (id_from_sid) {
 				struct owner_sid *gsid = (struct owner_sid *)ngroup_sid_ptr;
 				/* Populate the group ownership fields S-1-5-88-2 */
 				gsid->Revision = 1;
