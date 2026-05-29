@@ -1170,6 +1170,7 @@ const struct inode_operations cifs_dir_inode_ops = {
 	.atomic_open = cifs_atomic_open,
 	.tmpfile = cifs_tmpfile,
 	.lookup = cifs_lookup,
+	.fileattr_get = cifs_fileattr_get,
 	.getattr = cifs_getattr,
 	.unlink = cifs_unlink,
 	.link = cifs_hardlink,
