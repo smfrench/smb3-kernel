@@ -67,6 +67,72 @@ static long cifs_ioctl_query_info(unsigned int xid, struct file *filep,
 	return rc;
 }
 
+static int cifs_ioctl_set_compression(unsigned int xid, struct file *filep,
+				      struct cifs_tcon *tcon,
+				      struct cifsFileInfo *cfile)
+{
+	struct inode *inode = file_inode(filep);
+	struct cifs_sb_info *cifs_sb = CIFS_SB(inode->i_sb);
+	struct TCP_Server_Info *server = tcon->ses->server;
+	struct cifs_open_parms oparms;
+	struct cifsFileInfo *wfile;
+	struct cifsFileInfo tmp_cfile = {};
+	struct cifs_tcon *wtcon;
+	struct cifs_fid fid = {};
+	const char *full_path;
+	__u32 oplock = 0;
+	void *page;
+	int rc;
+
+	if (!server->ops->set_compression)
+		return -EOPNOTSUPP;
+
+	if (cfile && (cfile->fid.access & FILE_WRITE_DATA)) {
+		rc = server->ops->set_compression(xid, tcon, cfile);
+		if (rc != -EACCES)
+			return rc;
+	}
+
+	rc = cifs_get_writable_file(CIFS_I(inode), FIND_FSUID_ONLY, &wfile);
+	if (!rc) {
+		wtcon = tlink_tcon(wfile->tlink);
+		if (wtcon->ses->server->ops->set_compression)
+			rc = wtcon->ses->server->ops->set_compression(xid,
+									  wtcon, wfile);
+		else
+			rc = -EOPNOTSUPP;
+		cifsFileInfo_put(wfile);
+		if (rc != -EACCES)
+			return rc;
+	}
+
+	if (!server->ops->open || !server->ops->close)
+		return -EOPNOTSUPP;
+
+	page = alloc_dentry_path();
+	full_path = build_path_from_dentry(filep->f_path.dentry, page);
+	if (IS_ERR(full_path)) {
+		free_dentry_path(page);
+		return PTR_ERR(full_path);
+	}
+
+	oparms = CIFS_OPARMS(cifs_sb, tcon, full_path, FILE_WRITE_DATA,
+			     FILE_OPEN, 0, ACL_NO_MODE);
+	oparms.fid = &fid;
+
+	rc = server->ops->open(xid, &oparms, &oplock, NULL);
+	if (rc)
+		goto out;
+
+	tmp_cfile.fid = fid;
+	rc = server->ops->set_compression(xid, tcon, &tmp_cfile);
+
+	server->ops->close(xid, tcon, &fid);
+out:
+	free_dentry_path(page);
+	return rc;
+}
+
 static long cifs_ioctl_copychunk(unsigned int xid, struct file *dst_file,
 			unsigned long srcfd)
 {
@@ -427,8 +493,11 @@ long cifs_ioctl(struct file *filep, unsigned int command, unsigned long arg)
 
 			/* Try to set compress flag */
 			if (tcon->ses->server->ops->set_compression) {
-				rc = tcon->ses->server->ops->set_compression(
-							xid, tcon, pSMBFile);
+				rc = cifs_ioctl_set_compression(xid, filep, tcon,
+								pSMBFile);
+				if (rc == 0)
+					CIFS_I(inode)->cifsAttrs |=
+						FILE_ATTRIBUTE_COMPRESSED;
 				cifs_dbg(FYI, "set compress flag rc %d\n", rc);
 			}
 			break;
