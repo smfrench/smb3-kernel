@@ -2514,6 +2514,28 @@ int cifs_lock(struct file *file, int cmd, struct file_lock *flock)
 	return rc;
 }
 
+static void cifs_update_i_blocks_after_write(struct inode *inode, loff_t start,
+					     loff_t end)
+{
+	struct cifsInodeInfo *cinode = CIFS_I(inode);
+	u64 allocated_end = CIFS_INO_BYTES(inode->i_blocks);
+	u64 blocks;
+
+	if (cinode->cifsAttrs & FILE_ATTRIBUTE_SPARSE_FILE)
+		return;
+
+	/*
+	 * Grow the local estimate only across the currently known allocated
+	 * prefix. A write beyond that may leave a hole.
+	 */
+	if ((u64)start > allocated_end)
+		return;
+
+	blocks = CIFS_INO_BLOCKS(end);
+	if ((u64)inode->i_blocks < blocks)
+		inode->i_blocks = blocks;
+}
+
 void cifs_write_subrequest_terminated(struct cifs_io_subrequest *wdata, ssize_t result)
 {
 	struct netfs_io_request *wreq = wdata->rreq;
@@ -2532,6 +2554,8 @@ void cifs_write_subrequest_terminated(struct cifs_io_subrequest *wdata, ssize_t 
 			netfs_write_zero_point(inode, wrend);
 		if (wrend > ictx->_remote_i_size)
 			netfs_resize_file(ictx, wrend, true);
+		cifs_update_i_blocks_after_write(inode, wdata->subreq.start,
+						 wrend);
 
 		spin_unlock(&inode->i_lock);
 	}
@@ -2895,6 +2919,7 @@ cifs_writev(struct kiocb *iocb, struct iov_iter *from)
 	struct cifsInodeInfo *cinode = CIFS_I(inode);
 	struct TCP_Server_Info *server = tlink_tcon(cfile->tlink)->ses->server;
 	struct cifs_sb_info *cifs_sb = CIFS_SB(inode);
+	loff_t start;
 	ssize_t rc;
 
 	rc = netfs_start_io_write(inode);
@@ -2919,7 +2944,13 @@ cifs_writev(struct kiocb *iocb, struct iov_iter *from)
 		goto out;
 	}
 
+	start = iocb->ki_pos;
 	rc = netfs_buffered_write_iter_locked(iocb, from, NULL);
+	if (rc > 0) {
+		spin_lock(&inode->i_lock);
+		cifs_update_i_blocks_after_write(inode, start, start + rc);
+		spin_unlock(&inode->i_lock);
+	}
 
 out:
 	up_read(&cinode->lock_sem);
