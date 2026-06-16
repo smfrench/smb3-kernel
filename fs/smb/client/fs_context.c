@@ -35,6 +35,7 @@
 #include "nterr.h"
 #include "rfc1002pdu.h"
 #include "fs_context.h"
+#include "cached_dir.h"
 
 DEFINE_MUTEX(cifs_mount_mutex);
 
@@ -1283,6 +1284,43 @@ static void smb3_sync_ses_chan_max(struct cifs_ses *ses, size_t max_channels)
 }
 
 /*
+ * Propagate ctx->no_lease to every tcon under this superblock so future
+ * opens honor the new setting after a remount.  When switching to nolease,
+ * also drop deferred file handles and invalidate cached directory fids,
+ * since each holds an active lease from before the switch.
+ *
+ * Existing open handles keep their leases until the server breaks them
+ * or userspace closes the file -- nolease only governs new opens.
+ */
+static void smb3_sync_tcon_opts(struct cifs_sb_info *cifs_sb,
+				struct smb3_fs_context *ctx)
+{
+	struct tcon_link *tlink;
+	struct cifs_tcon *tcon;
+	struct rb_node *node;
+
+	spin_lock(&cifs_sb->tlink_tree_lock);
+	for (node = rb_first(&cifs_sb->tlink_tree); node; node = rb_next(node)) {
+		tlink = rb_entry(node, struct tcon_link, tl_rbnode);
+		tcon = tlink_tcon(tlink);
+		if (IS_ERR(tcon))
+			continue;
+		tcon->no_lease = ctx->no_lease;
+	}
+	spin_unlock(&cifs_sb->tlink_tree_lock);
+
+	/*
+	 * Both _sb() helpers iterate all tcons internally and handle
+	 * their own locking.  They can sleep, so they must be called
+	 * outside tlink_tree_lock.
+	 */
+	if (ctx->no_lease) {
+		cifs_close_all_deferred_files_sb(cifs_sb);
+		invalidate_all_cached_dirs_sb(cifs_sb);
+	}
+}
+
+/*
  * Synchronize server-level options that are stored on TCP_Server_Info
  * at mount time.  These fields are consulted at runtime (retry logic)
  * so remount needs to update the live server struct in addition to
@@ -1476,6 +1514,8 @@ static int smb3_reconfigure(struct fs_context *fc)
 #endif
 	if (!rc)
 		smb3_sync_server_opts(cifs_sb);
+	if (!rc)
+		smb3_sync_tcon_opts(cifs_sb, cifs_sb->ctx);
 
 	return rc;
 
