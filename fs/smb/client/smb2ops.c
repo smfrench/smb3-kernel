@@ -3667,6 +3667,7 @@ static long smb3_simple_falloc(struct file *file, struct cifs_tcon *tcon,
 	unsigned int xid;
 	loff_t old_eof, new_eof;
 	struct smb2_file_all_info file_inf;
+	struct kstatfs fsstat;
 	u64 asize;
 	int qrc;
 
@@ -3739,12 +3740,61 @@ static long smb3_simple_falloc(struct file *file, struct cifs_tcon *tcon,
 			smb2_set_sparse(xid, tcon, cfile, inode, false);
 
 		new_eof = off + len;
+
+		qrc = SMB2_query_info(xid, tcon,
+				      cfile->fid.persistent_fid,
+				      cfile->fid.volatile_fid, &file_inf);
+		if (qrc == 0)
+			asize = le64_to_cpu(file_inf.AllocationSize);
+
+		/*
+		 * FILE_ALLOCATION_INFORMATION can only describe allocation up to
+		 * new_eof. Some servers may accept it without allocating blocks,
+		 * so refresh AllocationSize before updating i_blocks.
+		 */
+		if (off == 0 || off == old_eof) {
+			if (qrc == 0 && new_eof > asize &&
+			    vfs_statfs(&file->f_path, &fsstat) == 0 &&
+			    fsstat.f_bsize) {
+				u64 bytes_needed = (u64)new_eof - asize;
+				u64 blocks_needed;
+
+				blocks_needed = DIV_ROUND_UP_ULL(bytes_needed,
+								 fsstat.f_bsize);
+				if (blocks_needed > fsstat.f_bavail) {
+					rc = -ENOSPC;
+					goto out;
+				}
+			}
+
+			rc = SMB2_set_allocation(xid, tcon,
+						 cfile->fid.persistent_fid,
+						 cfile->fid.volatile_fid,
+						 cfile->pid, new_eof);
+			if (rc)
+				goto out;
+		}
+
 		rc = SMB2_set_eof(xid, tcon, cfile->fid.persistent_fid,
 				  cfile->fid.volatile_fid, cfile->pid, new_eof);
-		if (rc == 0) {
-			netfs_resize_file(&cifsi->netfs, new_eof, true);
-			cifs_setsize(inode, new_eof);
+		if (rc)
+			goto out;
+
+		netfs_resize_file(&cifsi->netfs, new_eof, true);
+		cifs_setsize(inode, new_eof);
+
+		qrc = SMB2_query_info(xid, tcon,
+				      cfile->fid.persistent_fid,
+				      cfile->fid.volatile_fid, &file_inf);
+		spin_lock(&inode->i_lock);
+		if (qrc == 0) {
+			asize = le64_to_cpu(file_inf.AllocationSize);
+			if (asize >= new_eof)
+				inode->i_blocks = CIFS_INO_BLOCKS(asize);
+		} else {
+			cifsi->time = 0;
 		}
+		spin_unlock(&inode->i_lock);
 		goto out;
 	}
 
