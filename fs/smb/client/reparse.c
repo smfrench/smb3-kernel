@@ -1123,26 +1123,38 @@ static bool wsl_to_fattr(struct cifs_open_info_data *data,
 			 u32 tag, struct cifs_fattr *fattr)
 {
 	struct smb2_file_full_ea_info *ea;
+	bool ignore_missing_eas = false;
 	bool have_xattr_dev = false;
+	umode_t reparse_mode_type = 0;
 	u32 next = 0;
 
 	switch (tag) {
 	case IO_REPARSE_TAG_LX_SYMLINK:
-		fattr->cf_mode |= S_IFLNK;
+		reparse_mode_type = S_IFLNK;
 		break;
 	case IO_REPARSE_TAG_LX_FIFO:
-		fattr->cf_mode |= S_IFIFO;
+		reparse_mode_type = S_IFIFO;
 		break;
 	case IO_REPARSE_TAG_AF_UNIX:
-		fattr->cf_mode |= S_IFSOCK;
+		reparse_mode_type = S_IFSOCK;
 		break;
 	case IO_REPARSE_TAG_LX_CHR:
-		fattr->cf_mode |= S_IFCHR;
+		reparse_mode_type = S_IFCHR;
 		break;
 	case IO_REPARSE_TAG_LX_BLK:
-		fattr->cf_mode |= S_IFBLK;
+		reparse_mode_type = S_IFBLK;
 		break;
+	default:
+		return false;
 	}
+
+	/*
+	 * When reparse buffer is not available then this is from readdir() call
+	 * which does not provide EAs. readdir() can return DT_UNKNOWN type,
+	 * which is signaled by no filling the fattr->cf_mode and returning true.
+	 */
+	if (!data->reparse.buf && !data->wsl.eas_len)
+		ignore_missing_eas = true;
 
 	if (!data->wsl.eas_len)
 		goto out;
@@ -1168,7 +1180,7 @@ static bool wsl_to_fattr(struct cifs_open_info_data *data,
 			fattr->cf_gid = wsl_make_kgid(cifs_sb, v);
 		else if (!strncmp(name, SMB2_WSL_XATTR_MODE, nlen)) {
 			/* File type in reparse point tag and in xattr mode must match. */
-			if (S_DT(fattr->cf_mode) != S_DT(le32_to_cpu(*(__le32 *)v)))
+			if (S_DT(reparse_mode_type) != S_DT(le32_to_cpu(*(__le32 *)v)))
 				return false;
 			fattr->cf_mode = (umode_t)le32_to_cpu(*(__le32 *)v);
 		} else if (!strncmp(name, SMB2_WSL_XATTR_DEV, nlen)) {
@@ -1180,8 +1192,9 @@ out:
 
 	/* Major and minor numbers for char and block devices are mandatory. */
 	if (!have_xattr_dev && (tag == IO_REPARSE_TAG_LX_CHR || tag == IO_REPARSE_TAG_LX_BLK))
-		return false;
+		return ignore_missing_eas;
 
+	fattr->cf_mode |= reparse_mode_type;
 	return true;
 }
 
