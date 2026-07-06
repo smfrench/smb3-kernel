@@ -384,7 +384,7 @@ static int detect_directory_symlink_target(struct cifs_sb_info *cifs_sb,
 
 static int create_native_socket(const unsigned int xid, struct inode *inode,
 				struct dentry *dentry, struct cifs_tcon *tcon,
-				const char *full_path)
+				const char *full_path, umode_t mode)
 {
 	struct reparse_data_buffer buf = {
 		.ReparseTag = cpu_to_le32(IO_REPARSE_TAG_AF_UNIX),
@@ -398,6 +398,10 @@ static int create_native_socket(const unsigned int xid, struct inode *inode,
 		.iov_base = &buf,
 		.iov_len = sizeof(buf),
 	};
+#ifdef CONFIG_CIFS_XATTR
+	const __le64 xattr_mode_val = cpu_to_le64(mode);
+	struct cifs_sb_info *cifs_sb = CIFS_SB(inode->i_sb);
+#endif
 	struct inode *new;
 	int rc = 0;
 
@@ -408,6 +412,28 @@ static int create_native_socket(const unsigned int xid, struct inode *inode,
 		d_instantiate(dentry, new);
 	else
 		rc = PTR_ERR(new);
+
+	/*
+	 * Try to set also optional WSL EA $LXMOD but ignore errors.
+	 * WSL socket and native Win32/NT sockets uses same reparse point
+	 * tag IO_REPARSE_TAG_AF_UNIX. WSL subsystem additionally requires
+	 * EA $LXMOD to be set with the S_IFSOCK value. So setting this EA
+	 * allows native socket to be recognized also by WSL subsystem.
+	 * Note that setting of both EAs and reparse points is not supported
+	 * by NTFS filesystem on Windows 8 / Windows Server 2012 and always
+	 * fails. So ignore failures from this set_EA call.
+	 */
+#ifdef CONFIG_CIFS_XATTR
+	if (!rc && tcon->ses->server->ops->set_EA &&
+	    (le32_to_cpu(tcon->fsAttrInfo.Attributes) & FILE_SUPPORTS_EXTENDED_ATTRIBUTES))
+		tcon->ses->server->ops->set_EA(xid, tcon, full_path,
+					       true /* open reparse point */,
+					       SMB2_WSL_XATTR_MODE,
+					       &xattr_mode_val,
+					       SMB2_WSL_XATTR_MODE_SIZE,
+					       cifs_sb->local_nls, cifs_sb);
+#endif
+
 	cifs_free_open_info(&data);
 	return rc;
 }
@@ -710,7 +736,7 @@ int mknod_reparse(unsigned int xid, struct inode *inode,
 	struct smb3_fs_context *ctx = CIFS_SB(inode->i_sb)->ctx;
 
 	if (S_ISSOCK(mode) && !ctx->nonativesocket && ctx->reparse_type != CIFS_REPARSE_TYPE_NONE)
-		return create_native_socket(xid, inode, dentry, tcon, full_path);
+		return create_native_socket(xid, inode, dentry, tcon, full_path, mode);
 
 	switch (ctx->reparse_type) {
 	case CIFS_REPARSE_TYPE_NFS:
