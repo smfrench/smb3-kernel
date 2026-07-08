@@ -250,6 +250,7 @@ struct cifs_open_info_data {
 	bool adjust_tz;
 	bool reparse_point;
 	bool contains_posix_file_info;
+	u32 cf_flags;
 	struct {
 		/* ioctl response buffer */
 		struct {
