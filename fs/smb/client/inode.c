@@ -11,6 +11,7 @@
 #include <linux/slab.h>
 #include <linux/pagemap.h>
 #include <linux/freezer.h>
+#include <linux/fileattr.h>
 #include <linux/sched/signal.h>
 #include <linux/wait_bit.h>
 #include <linux/fiemap.h>
@@ -2918,6 +2919,31 @@ int cifs_revalidate_dentry(struct dentry *dentry)
 		return rc;
 
 	return cifs_revalidate_mapping(inode);
+}
+
+int cifs_fileattr_get(struct dentry *dentry, struct file_kattr *fa)
+{
+	struct inode *inode = d_inode(dentry);
+	u32 flags = 0;
+	int rc;
+
+	if (!fa->flags_valid && !fa->fsx_valid)
+		return -EOPNOTSUPP;
+
+	rc = cifs_revalidate_dentry_attr(dentry);
+	if (rc)
+		return rc;
+
+	inode = d_inode(dentry);
+	if (!inode)
+		return -ENOENT;
+
+	if (CIFS_I(inode)->cifsAttrs & FILE_ATTRIBUTE_COMPRESSED)
+		flags |= FS_COMPR_FL;
+
+	fileattr_fill_flags(fa, flags);
+
+	return 0;
 }
 
 int cifs_getattr(struct mnt_idmap *idmap, const struct path *path,

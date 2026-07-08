@@ -77,6 +77,7 @@ int cifs_revalidate_dentry_attr(struct dentry *dentry);
 int cifs_revalidate_file(struct file *filp);
 int cifs_revalidate_dentry(struct dentry *dentry);
 int cifs_revalidate_mapping(struct inode *inode);
+int cifs_fileattr_get(struct dentry *dentry, struct file_kattr *fa);
 int cifs_zap_mapping(struct inode *inode);
 int cifs_getattr(struct mnt_idmap *idmap, const struct path *path,
 		 struct kstat *stat, u32 request_mask, unsigned int flags);
