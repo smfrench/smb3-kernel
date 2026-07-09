@@ -188,7 +188,7 @@ static __always_inline void *lz77_encode_match(void *dst, void **nib, u16 dist, 
  * MS-XCA 2.3.4 "Plain LZ77 Compression Algorithm Details" - "Processing"
  */
 static __always_inline void *lz77_encode_literals(const void *start, const void *end, void *dst,
-						  long *f, u32 *fc, void **fp)
+						  u32 *f, u32 *fc, void **fp)
 {
 	if (start >= end)
 		return dst;
@@ -201,7 +201,10 @@ static __always_inline void *lz77_encode_literals(const void *start, const void 
 		dst += len;
 		start += len;
 
-		*f <<= len;
+		if (len == LZ77_FLAG_MAX)
+			*f = 0;
+		else
+			*f <<= len;
 		*fc += len;
 		if (*fc == LZ77_FLAG_MAX) {
 			lz77_write32(*fp, *f);
@@ -225,7 +228,7 @@ noinline int smb_lz77_compress(const void *src, const u32 slen,
 	const void *srcp, *rlim, *end, *anchor;
 	u32 *htable, hash, flag_count = 0;
 	void *dstp, *nib, *flag_pos;
-	long flag = 0;
+	u32 flag = 0;
 
 	/* This is probably a bug, so throw a warning. */
 	if (WARN_ON_ONCE(*dlen < smb_lz77_compressed_alloc_size(slen)))
@@ -327,9 +330,13 @@ noinline int smb_lz77_compress(const void *src, const u32 slen,
 out:
 	dstp = lz77_encode_literals(anchor, end, dstp, &flag, &flag_count, &flag_pos);
 
-	flag_count = LZ77_FLAG_MAX - flag_count;
-	flag <<= flag_count;
-	flag |= (1UL << flag_count) - 1;
+	if (flag_count) {
+		flag_count = LZ77_FLAG_MAX - flag_count;
+		flag <<= flag_count;
+		flag |= (1U << flag_count) - 1;
+	} else {
+		flag = ~0U;
+	}
 	lz77_write32(flag_pos, flag);
 
 	*dlen = dstp - dst;
