@@ -582,7 +582,7 @@ struct smb_version_operations {
 	unsigned int (*wp_retry_size)(struct inode *);
 	/* get mtu credits */
 	int (*wait_mtu_credits)(struct TCP_Server_Info *, size_t,
-				size_t *, struct cifs_credits *);
+				size_t *, struct cifs_credits *, bool);
 	/* adjust previously taken mtu credits to request size */
 	int (*adjust_credits)(struct TCP_Server_Info *server,
 			      struct cifs_io_subrequest *subreq,
@@ -706,6 +706,7 @@ struct TCP_Server_Info {
 	bool terminate;
 	int credits;  /* send no more requests at once */
 	unsigned int max_credits; /* can override large 32000 default at mnt */
+	unsigned int queued;  /* number of requests queued to be sent on the wire */
 	unsigned int in_flight;  /* number of requests on the wire to server */
 	unsigned int max_in_flight; /* max number of requests that were on wire */
 	spinlock_t req_lock;  /* protect the two values above */
@@ -834,6 +835,8 @@ struct TCP_Server_Info {
 	char *leaf_fullpath;
 	bool dfs_conn:1;
 	char dns_dom[CIFS_MAX_DOMAINNAME_LEN + 1];
+
+	struct workqueue_struct *fio_wq;
 };
 
 static inline bool is_smb1(const struct TCP_Server_Info *server)
@@ -1498,6 +1501,7 @@ struct cifs_io_subrequest {
 	int				result;
 	bool				have_xid;
 	bool				replay;
+	bool				offloaded;
 	unsigned int			retries;	/* number of retries so far */
 	unsigned int			cur_sleep;	/* time to sleep before replay */
 	struct kvec			iov[2];

@@ -38,6 +38,53 @@
 #include <trace/events/netfs.h>
 
 static int cifs_reopen_file(struct cifsFileInfo *cfile, bool can_flush);
+static void cifs_do_issue_write(struct netfs_io_subrequest *subreq);
+
+struct cifs_file_io_work {
+	struct work_struct work;
+	struct netfs_io_subrequest *subreq;
+};
+
+static void cifs_dequeue_in_flight(struct cifs_io_subrequest *wdata)
+{
+	struct TCP_Server_Info *server = wdata->server;
+
+	if (wdata->credits.value > 0) {
+		spin_lock(&server->req_lock);
+		server->in_flight++;
+		server->queued--;
+		if (server->in_flight > server->max_in_flight)
+			server->max_in_flight = server->in_flight;
+		spin_unlock(&server->req_lock);
+	}
+}
+
+static void cifs_issue_write_work_fn(struct work_struct *work)
+{
+	struct cifs_file_io_work *w = container_of(work, struct cifs_file_io_work, work);
+	struct cifs_io_subrequest *wdata =
+			container_of(w->subreq, struct cifs_io_subrequest, subreq);
+
+	cifs_dequeue_in_flight(wdata);
+	cifs_do_issue_write(w->subreq);
+	kfree(w);
+}
+
+static int cifs_offload_write(struct netfs_io_subrequest *subreq)
+{
+	struct cifs_io_subrequest *wdata =
+		container_of(subreq, struct cifs_io_subrequest, subreq);
+	struct cifs_file_io_work *w = kmalloc_obj(*w, GFP_NOFS);
+
+	if (!w)
+		return -ENOMEM;
+
+	w->subreq = subreq;
+	INIT_WORK(&w->work, cifs_issue_write_work_fn);
+	queue_work(wdata->server->fio_wq, &w->work);
+
+	return 0;
+}
 
 /*
  * Prepare a subrequest to upload to the server.  We need to allocate credits
@@ -49,10 +96,12 @@ static void cifs_prepare_write(struct netfs_io_subrequest *subreq)
 		container_of(subreq, struct cifs_io_subrequest, subreq);
 	struct cifs_io_request *req = wdata->req;
 	struct netfs_io_stream *stream = &req->rreq.io_streams[subreq->stream_nr];
+	struct cifs_ses *ses = tlink_tcon(req->cfile->tlink)->ses;
 	struct TCP_Server_Info *server;
 	struct cifsFileInfo *open_file = req->cfile;
 	struct cifs_sb_info *cifs_sb = CIFS_SB(wdata->rreq->inode->i_sb);
 	size_t wsize = req->rreq.wsize;
+	bool offload;
 	int rc;
 
 	if (!wdata->have_xid) {
@@ -78,8 +127,12 @@ retry:
 		}
 	}
 
+	spin_lock(&ses->chan_lock);
+	offload = ses->chan_count > 1;
+	spin_unlock(&ses->chan_lock);
+	wdata->offloaded = offload;
 	rc = server->ops->wait_mtu_credits(server, wsize, &stream->sreq_max_len,
-					   &wdata->credits);
+					   &wdata->credits, offload);
 	if (rc < 0) {
 		subreq->error = rc;
 		return netfs_prepare_write_failed(subreq);
@@ -108,7 +161,7 @@ retry:
 /*
  * Issue a subrequest to upload to the server.
  */
-static void cifs_issue_write(struct netfs_io_subrequest *subreq)
+static void cifs_do_issue_write(struct netfs_io_subrequest *subreq)
 {
 	struct cifs_io_subrequest *wdata =
 		container_of(subreq, struct cifs_io_subrequest, subreq);
@@ -142,6 +195,25 @@ fail:
 	goto out;
 }
 
+static void cifs_issue_write(struct netfs_io_subrequest *subreq)
+{
+	struct cifs_io_subrequest *wdata = container_of(subreq, struct cifs_io_subrequest, subreq);
+	int err;
+
+	if (!wdata->offloaded) {
+		cifs_do_issue_write(subreq);
+		return;
+	}
+
+	err = cifs_offload_write(subreq);
+	if (err) {
+		trace_netfs_sreq(subreq, netfs_sreq_trace_fail);
+		cifs_dequeue_in_flight(wdata);
+		add_credits_and_wake_if(wdata->server, &wdata->credits, 0);
+		cifs_write_subrequest_terminated(wdata, err);
+	}
+}
+
 static void cifs_netfs_invalidate_cache(struct netfs_io_request *wreq)
 {
 	cifs_invalidate_cache(wreq->inode, 0);
@@ -173,7 +245,7 @@ static int cifs_prepare_read(struct netfs_io_subrequest *subreq)
 				     tlink_tcon(req->cfile->tlink));
 
 	rc = server->ops->wait_mtu_credits(server, cifs_sb->ctx->rsize,
-					   &size, &rdata->credits);
+					   &size, &rdata->credits, false);
 	if (rc)
 		return rc;
 
