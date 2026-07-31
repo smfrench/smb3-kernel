@@ -66,12 +66,14 @@ struct ksmbd_user *ksmbd_alloc_user(struct ksmbd_login_response *resp,
 		ksmbd_debug(SMB, "supplementary groups : %d\n", user->ngroups);
 	}
 
+	kfree(resp_ext);
 	return user;
 
 err_free:
 	kfree(user->name);
 	kfree(user->passkey);
 	kfree(user);
+	kfree(resp_ext);
 	return NULL;
 }
 
