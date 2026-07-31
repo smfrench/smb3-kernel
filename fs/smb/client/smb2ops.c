@@ -244,7 +244,8 @@ smb2_get_credits(struct mid_q_entry *mid)
 
 static int
 smb2_wait_mtu_credits(struct TCP_Server_Info *server, size_t size,
-		      size_t *num, struct cifs_credits *credits)
+		      size_t *num, struct cifs_credits *credits,
+		      bool offloaded)
 {
 	int rc = 0;
 	unsigned int scredits, in_flight;
@@ -289,7 +290,13 @@ smb2_wait_mtu_credits(struct TCP_Server_Info *server, size_t size,
 				DIV_ROUND_UP(*num, SMB2_MAX_BUFFER_SIZE);
 			credits->instance = server->reconnect_instance;
 			server->credits -= credits->value;
-			server->in_flight++;
+
+			/* steal the credits, but don't mark in_flight yet */
+			if (offloaded)
+				server->queued++;
+			else
+				server->in_flight++;
+
 			if (server->in_flight > server->max_in_flight)
 				server->max_in_flight = server->in_flight;
 			break;

@@ -629,7 +629,7 @@ wait_for_compound_request(struct TCP_Server_Info *server, int num,
 
 int
 cifs_wait_mtu_credits(struct TCP_Server_Info *server, size_t size,
-		      size_t *num, struct cifs_credits *credits)
+		      size_t *num, struct cifs_credits *credits, bool offloaded)
 {
 	*num = size;
 	credits->value = 0;
@@ -847,8 +847,8 @@ struct TCP_Server_Info *cifs_pick_channel(struct cifs_ses *ses)
 		 * taking the lock could help reduce wait time, which is
 		 * important for this function
 		 */
-		if (server->in_flight < min_in_flight) {
-			min_in_flight = server->in_flight;
+		if (server->in_flight + server->queued < min_in_flight) {
+			min_in_flight = server->in_flight + server->queued;
 			index = cur;
 		}
 	}

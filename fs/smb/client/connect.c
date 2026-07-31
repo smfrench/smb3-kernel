@@ -5,6 +5,7 @@
  *   Author(s): Steve French (sfrench@us.ibm.com)
  *
  */
+#include <linux/workqueue.h>
 #include <linux/fs.h>
 #include <linux/fs_context.h>
 #include <linux/net.h>
@@ -1722,6 +1723,8 @@ cifs_put_tcp_session(struct TCP_Server_Info *server, int from_reconnect)
 	else
 		cancel_delayed_work_sync(&server->reconnect);
 
+	destroy_workqueue(server->fio_wq);
+
 	/* For secondary channels, we pick up ref-count on the primary server */
 	if (SERVER_IS_CHAN(server))
 		cifs_put_tcp_session(server->primary_server, from_reconnect);
@@ -1746,6 +1749,7 @@ cifs_get_tcp_session(struct smb3_fs_context *ctx,
 		     struct TCP_Server_Info *primary_server)
 {
 	struct TCP_Server_Info *tcp_ses = NULL;
+	unsigned long chan_nr = 0;
 	int rc;
 
 	cifs_dbg(FYI, "UNC: %s\n", ctx->UNC);
@@ -1793,11 +1797,12 @@ cifs_get_tcp_session(struct smb3_fs_context *ctx,
 	tcp_ses->tcp_nodelay = ctx->sockopt_tcp_nodelay;
 	tcp_ses->rdma = ctx->rdma;
 	tcp_ses->in_flight = 0;
+	tcp_ses->queued = 0;
 	tcp_ses->max_in_flight = 0;
 	tcp_ses->credits = 1;
 	if (primary_server) {
 		spin_lock(&cifs_tcp_ses_lock);
-		++primary_server->srv_count;
+		chan_nr = ++primary_server->srv_count;
 		spin_unlock(&cifs_tcp_ses_lock);
 		tcp_ses->primary_server = primary_server;
 	}
@@ -1843,6 +1848,15 @@ cifs_get_tcp_session(struct smb3_fs_context *ctx,
 	tcp_ses->tcpStatus = CifsNew;
 	++tcp_ses->srv_count;
 	tcp_ses->echo_interval = ctx->echo_interval * HZ;
+
+	tcp_ses->fio_wq = alloc_ordered_workqueue("cifs_fio-%p-%lu",
+						  WQ_MEM_RECLAIM,
+						  tcp_ses->primary_server ? tcp_ses->primary_server : tcp_ses,
+						  chan_nr);
+	if (!tcp_ses->fio_wq) {
+		rc = -ENOMEM;
+		goto out_err_crypto_release;
+	}
 
 	if (tcp_ses->rdma) {
 #ifndef CONFIG_CIFS_SMB_DIRECT
@@ -1926,6 +1940,8 @@ out_err:
 		kfree(tcp_ses->leaf_fullpath);
 		if (tcp_ses->ssocket)
 			sock_release(tcp_ses->ssocket);
+		if (tcp_ses->fio_wq)
+			destroy_workqueue(tcp_ses->fio_wq);
 		kfree(tcp_ses);
 	}
 	return ERR_PTR(rc);
